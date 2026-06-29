@@ -69,7 +69,7 @@ Five **mainnet** bundles from live `transactions.jsonl` runs (`happy-path-single
 
 **Takeaway:** Sub-400 ms submit→processed on mainnet with **~0.00001–0.000018 SOL** tips — gated one slot before the Jito leader (`gate_dist = 1` on every row). 
 
-Note: This is just a sneak-peak, a larger table showing more reports will be seen in a later section.
+Note: This is just a sneak-peak, a larger table showing more reports happy, failure, and AI retry paths will be seen in a later section.
 
 ---
 
@@ -77,7 +77,11 @@ Note: This is just a sneak-peak, a larger table showing more reports will be see
 
 ![TURBINE architecture diagram](assets/TURBINE%20ARCH%20DIAGRAM%20(1).png)
 
-### Overview
+**[View The Complete Architectural Document Breakdown Here →](https://docs.google.com/presentation/d/1WPVPPuMAiaqzYktap83oNc2iMOPpyrg0m-BdWr4AoX4/edit?usp=sharing)** (Google Slides)
+
+### Stack Overview
+
+We built 9 rust crates for TURBINE as follows:
 
 | Crate | Role |
 |-------|------|
@@ -88,8 +92,10 @@ Note: This is just a sneak-peak, a larger table showing more reports will be see
 | `turbine-ai` | Cold-path analyst, governor, normalization |
 | `turbine-ipc` | UDS control plane (bincode frames) |
 | `turbine-tui` / `turbine-web` | Lossy telemetry surfaces |
-| `turbine-cli` | `turbine` binary — start, run, stop, status |
+| `turbine-cli` | `turbine` binary — start, run, stop, status. example: turbine start, turbine stop |
 | `turbine-core` | Config, types, EMA math, `TelemetryEvent` |
+
+### Architecture Overview
 
 ```mermaid
 flowchart LR
@@ -99,9 +105,20 @@ flowchart LR
     HS -.->|lossy broadcast| UI[TUI + Web]
 ```
 
+The mermaid diagram above shows the most basic architectural diagram for TURBINE. At a high level, TURBINE is split into 6 different layers (as seen above) operateling together and concurently. We will briefly go over each of them below:
+
+Note: the explanations below is just a brief walkthrough of the layers. For complete teardown of the architecture, please visit the **[Google Slides →](https://docs.google.com/presentation/d/1WPVPPuMAiaqzYktap83oNc2iMOPpyrg0m-BdWr4AoX4/edit?usp=sharing)**
+
 ---
 
 ### 1 · Ingestion (`turbine-ingest`)
+
+```mermaid
+flowchart TB
+    GEY[Geyser gRPC] -->|mpsc 8192| DPU
+    TIP[Jito tip WS/REST] -->|mpsc 256| DPU
+    RPC[RPC blockhash] -->|watch| DPU
+```
 
 **Sources:** Yellowstone/Geyser (TLS gRPC), Jito `tip_stream` WebSocket + `tip_floor` REST, Solana JSON-RPC (`getLatestBlockhash`, boot-only tip accounts).
 
@@ -121,13 +138,6 @@ flowchart LR
 - **HTTP/2 adaptive window + ping echo** — healthy gRPC flow on the wire.
 
 Tips → `mpsc(256)`. Blockhash → `watch` (latest only).
-
-```mermaid
-flowchart TB
-    GEY[Geyser gRPC] -->|mpsc 8192| DPU
-    TIP[Jito tip WS/REST] -->|mpsc 256| DPU
-    RPC[RPC blockhash] -->|watch| DPU
-```
 
 ---
 
@@ -150,9 +160,10 @@ Single **`tokio::select!`** consumer — one serial writer to hot state, no lock
 
 Time-decayed EMA (irregular event times):
 
-$$ \text{decay} = e^{-\frac{\ln(2) \cdot \Delta t}{\text{half\_life}}} $$
+$$ \text{decay} = e^{-\frac{\ln(2) \cdot \Delta t}{\mathit{half\_life}}} $$
 
 $$ \alpha = 1 - \text{decay} $$
+
 
 $$ \text{EMA}_t = \alpha \cdot x_t + \text{decay} \cdot \text{EMA}_{t-1} $$
 
@@ -246,9 +257,13 @@ flowchart LR
 | **Web Studio** | Same bus + 400 ms `HotState` history snapshot over WebSocket | No — lossy; `Lagged` drops frames |
 | **IPC** | UDS bincode → daemon → engine | No — separate `mpsc(64)` |
 
+#### TURBINE Terminal UI
+
 ![TURBINE TUI](assets/TUI.png)
 
-![TURBINE Web Studio](assets/WEB-UI.png)
+#### TURBINE Web Studio at http://127.0.0.1:9000
+
+![TURBINE Web Studio](assets/turbine-web.png)
 
 ---
 
