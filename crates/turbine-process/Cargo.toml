@@ -1,0 +1,18 @@
+[package]
+name = "turbine-process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE data processing: write-lock extraction, contention EMA, lifecycle tracking"
+
+[dependencies]
+turbine-core = { workspace = true }
+turbine-state = { workspace = true }
+turbine-ingest = { workspace = true }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+bs58 = { workspace = true }
+solana-pubkey = { workspace = true }
+
+yellowstone-grpc-proto = { workspace = true }

@@ -1,0 +1,18 @@
+[package]
+name = "turbine-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE hot state: lock-free-friendly facade over contention, tips, lifecycle, blockhash"
+
+[dependencies]
+turbine-core = { workspace = true }
+
+tokio = { workspace = true }
+dashmap = { workspace = true }
+arc-swap = { workspace = true }
+solana-pubkey = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bs58 = { workspace = true }
+tracing = { workspace = true }

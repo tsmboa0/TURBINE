@@ -1,0 +1,112 @@
+# TURBINE configuration. Secrets/endpoints can be overridden via env vars:
+#   TURBINE_GEYSER_ENDPOINT, TURBINE_GEYSER_X_TOKEN, TURBINE_RPC_URL,
+#   TURBINE_WALLET_KEYPAIR, TURBINE_JITO_BLOCK_ENGINE_URL
+
+[geyser]
+endpoint = "https://fra.grpc.solinfra.dev:443"
+x_token = ""
+TURBINE_GEYSER_X_TOKEN = ""
+commitment = "processed"
+max_decoding_message_size_bytes = 67108864
+
+[rpc]
+http_url = "https://api.mainnet-beta.solana.com"
+blockhash_refresh_ms = 2000
+
+[jito]
+block_engine_url = "https://mainnet.block-engine.jito.wtf"
+json_rpc_url = "https://mainnet.block-engine.jito.wtf/api/v1"
+tip_floor_url = "https://bundles.jito.wtf/api/v1/bundles/tip_floor"
+tip_stream_url = "wss://bundles.jito.wtf/api/v1/bundles/tip_stream"
+
+block_engine_keypair_path = "./block_engine_keypair.json"   # optional; keyless by default
+
+# Extra Jito validator identities, UNIONED with the set auto-fetched from kobe.
+# Empty is fine — kobe provides the full Jito-enabled set. If both are empty the
+# gate uses a synthetic next-leader fallback (see [execution]).
+
+validator_identities = []
+
+# Jito "kobe" endpoint listing all Jito-enabled validators. Fetched at boot and
+# per epoch to build the leader schedule locally (next leader + live countdown
+# are then derived from the cached schedule on every slot — no per-slot RPC).
+
+kobe_validators_url = "https://kobe.mainnet.jito.network/api/v1/validators"
+
+[wallet]
+keypair_path = "./test_keypair.json"    # or set TURBINE_WALLET_KEYPAIR
+pubkey = ""               
+TURBINE_WALLET_PUBKEY = ""
+
+[targets]
+# NOTE: `programs` is informational only — the Geyser transaction subscription is
+# filtered by `watched_accounts` (below), NOT by program. Subscribing to a whole
+# hot program (e.g. Pump AMM) floods the stream with txs we discard and triggers
+# server-side backpressure; we only need the txs that touch our watched accounts.
+
+programs = [
+  "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+]
+
+# Specific WRITABLE state accounts your strategy contends on (pool/vault/curve state).
+# The Geyser tx stream is filtered to exactly these accounts; contention is measured
+# against them (a tx counts only when it WRITE-locks one of these).
+
+watched_accounts = [
+  "ABd4DYTJx2PogBpG5pbK7Dkh5VkJLMaCLhY6aVHpa1gk"
+]
+
+[strategy]
+ema_half_life_ms = 2000
+ema_slow_half_life_ms = 30000
+tip_ema_half_life_ms = 5000
+quiet_z = 0.5
+hot_z = 2.0
+gate_min = 1
+gate_max = 1
+tip_bump_pct = 0.10              # flat bump on top of the selected percentile floor
+
+# Contention-scaled bump: extra fractional tip per z-score unit ABOVE hot_z, so we
+# bid harder exactly when the bottleneck account spikes. Capped to keep it bounded.
+
+contention_bump_slope = 0.10     # +10% per z above hot_z (0 disables, flat bump only)
+max_contention_bump_pct = 0.50   # at most +50% from contention, before the hard clamp
+min_tip_lamports = 1000
+max_tip_lamports = 20000
+max_trades_per_bundle = 4
+
+[execution]
+dry_run = false                  # build/price/gate only; no real submission. Set false to go live.
+gate_max_wait_ms = 2000
+blockhash_max_age_ms = 45000
+# Legacy knob for the old leader pollers. The leader view is now event-driven
+# (recomputed on every slot from the epoch-cached schedule), so this is unused.
+leader_refresh_ms = 3000
+
+# Every bundle failure is routed to the AI analyst (no deterministic fix path).
+# The analyst classifies + proposes a fix; the governor enforces these caps; the
+# coordinator rebuilds and resubmits autonomously. Set `enabled = true` and export
+# the API key (see `api_key_env`) to use a live model; otherwise retries are
+# recorded but not auto-applied. The reasoning trail is persisted for the web UI.
+
+# Set `api_key` here for local testing, or export TURBINE_AI_API_KEY before start.
+[ai]
+enabled = true
+provider = "openai"
+model = "gpt-5.4-mini"
+api_key = ""
+api_key_env = "TURBINE_AI_API_KEY"
+max_attempts = 3
+max_slippage_bps = 500
+spend_cap_lamports_per_min = 10000000
+# A submitted bundle that neither lands nor returns a result within this window is
+# treated as a timeout failure and routed to the AI.
+retry_timeout_ms = 8000
+
+[server]
+# Web "Studio" UI bind address (Phase 9). Also shown as the `Studio` link on the
+# TUI boot splash + dashboard footer (`http://<web_bind>`).
+web_bind = "127.0.0.1:9000"
+
+[ipc]
+socket_path = "/tmp/turbine.sock"

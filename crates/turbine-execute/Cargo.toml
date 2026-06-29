@@ -1,0 +1,37 @@
+[package]
+name = "turbine-execute"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE execution: fee matrix, bundle compiler, lookahead gate, Jito submit"
+
+[dependencies]
+turbine-core = { workspace = true }
+turbine-state = { workspace = true }
+turbine-ingest = { workspace = true }
+turbine-ai = { workspace = true }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+dashmap = { workspace = true }
+
+# Jito searcher gRPC (Phase 5)
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+futures = { workspace = true }
+
+solana-pubkey = { workspace = true }
+solana-sdk = { workspace = true }
+
+bincode = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+jito-sdk-rust = { workspace = true }
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "turbine-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE terminal dashboard: boot sequence + short, dense, glanceable control panel (broadcast-bus only)"
+
+[dependencies]
+turbine-core = { workspace = true }
+turbine-state = { workspace = true }
+turbine-execute = { workspace = true }
+solana-pubkey = { workspace = true }
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "turbine-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE AI failure analyst & autonomous retry decision engine (cold path)"
+
+[dependencies]
+turbine-core = { workspace = true }
+turbine-state = { workspace = true }
+
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }

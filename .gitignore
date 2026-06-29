@@ -1,0 +1,16 @@
+/target
+**/target
+*.log
+.env
+.env.*
+secrets/
+*.keypair.json
+wallet-*.json
+*.canvas.data.json
+.DS_Store
+/test_keypair.json
+/block_engine_keypair.json
+/ARCHITECTURE.md
+/SYSTEM_GUIDE.md
+/IMPLEMENTATION_PLAN.md
+/jito_polls.jsonl

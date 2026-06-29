@@ -1,0 +1,28 @@
+[package]
+name = "turbine-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE command-line interface and daemon entrypoint"
+
+[[bin]]
+name = "turbine"
+path = "src/main.rs"
+
+[dependencies]
+turbine-core = { workspace = true }
+turbine-state = { workspace = true }
+turbine-ingest = { workspace = true }
+turbine-process = { workspace = true }
+turbine-execute = { workspace = true }
+turbine-ai = { workspace = true }
+turbine-ipc = { workspace = true }
+turbine-tui = { workspace = true }
+turbine-web = { workspace = true }
+solana-pubkey = { workspace = true }
+rand = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

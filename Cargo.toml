@@ -1,0 +1,95 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["TURBINE"]
+repository = "https://github.com/turbine"
+
+# Shared dependency versions. Each phase adds the crates it needs here so all
+# member crates stay on one consistent version. Phase 0 keeps this minimal and
+# protoc-free so the scaffold builds before the proto crates are introduced.
+[workspace.dependencies]
+# Internal crates
+turbine-core = { path = "crates/turbine-core" }
+turbine-state = { path = "crates/turbine-state" }
+turbine-ingest = { path = "crates/turbine-ingest" }
+turbine-process = { path = "crates/turbine-process" }
+turbine-execute = { path = "crates/turbine-execute" }
+turbine-ai = { path = "crates/turbine-ai" }
+turbine-ipc = { path = "crates/turbine-ipc" }
+turbine-tui = { path = "crates/turbine-tui" }
+turbine-web = { path = "crates/turbine-web" }
+
+# Async runtime & utilities
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Concurrent hot-state primitives (Phase 2/3)
+dashmap = "6"
+arc-swap = "1"
+bs58 = "0.5"
+
+# Execution / signing (Phase 4). The solana-sdk umbrella pins a mutually
+# compatible set of granular crates (aligned to solana-pubkey 4.x).
+jito-sdk-rust = { path = "../jito-rust-rpc" }
+solana-sdk = "4.0.1"
+bincode = "1.3"
+base64 = "0.22"
+rand = "0.8"
+
+# gRPC / streaming / HTTP (Phase 1 ingestion)
+tonic = { version = "0.14", features = ["transport", "tls-native-roots", "tls-ring"] }
+# Jito searcher gRPC codegen (Phase 5) — versions mirror Yellowstone's tonic 0.14 set.
+tonic-prost = "0.14.0"
+tonic-prost-build = "0.14.0"
+prost = "0.14.0"
+prost-types = "0.14.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+
+# Reference SDKs (sibling repos to this workspace)
+yellowstone-grpc-client = { path = "../yellowstone-grpc/yellowstone-grpc-client" }
+yellowstone-grpc-proto = { path = "../yellowstone-grpc/yellowstone-grpc-proto" }
+
+# Serialization / config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Errors / logging
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# TUI (Phase 8) — ratatui 0.29 pairs with crossterm 0.28.
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Web telemetry (Phase 9) — axum with the WebSocket extractor.
+axum = { version = "0.7", features = ["ws"] }
+
+# Solana types — pinned to the versions the Yellowstone crates use so the whole
+# workspace shares ONE Pubkey type (avoids two incompatible solana-pubkey majors).
+solana-pubkey = { version = "4.1", features = ["serde"] }
+
+# ── Production release optimizations (see IMPLEMENTATION_PLAN.md §11) ──
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = false
+debug = false
+
+[profile.bench]
+inherits = "release"
+debug = true

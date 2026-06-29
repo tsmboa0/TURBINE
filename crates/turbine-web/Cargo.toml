@@ -1,0 +1,16 @@
+[package]
+name = "turbine-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+turbine-core = { workspace = true }
+turbine-state = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bs58 = { workspace = true }
+tracing = { workspace = true }
+socket2 = "0.6"

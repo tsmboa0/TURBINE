@@ -1,0 +1,13 @@
+[package]
+name = "turbine-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE control-plane IPC: length-prefixed bincode frames over a Unix domain socket"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

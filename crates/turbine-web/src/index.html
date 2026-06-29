@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TURBINE · Studio</title>
+<style>
+  :root {
+    --bg:#070b13; --panel:#0b1018; --panel2:#0e1521; --grid:#16202e;
+    --neon:#38e1ff; --neon-dim:#1c6f86; --fg:#d4e9f6; --dim:#65788a;
+    --green:#33f6a0; --yellow:#ffd23f; --red:#ff5d77; --violet:#9b8cff;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(56,225,255,.08), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(155,140,255,.06), transparent 60%),
+      var(--bg);
+    color:var(--fg); font-family:var(--mono); font-size:13px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--neon); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  .wrap { max-width:1360px; margin:0 auto; padding:18px 20px 60px; }
+
+  /* Top bar */
+  .topbar {
+    display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+    border:1px solid var(--grid); border-radius:12px; padding:12px 16px;
+    background:linear-gradient(180deg, var(--panel2), var(--panel));
+  }
+  .brand { font-weight:800; letter-spacing:.28em; font-size:18px;
+    color:var(--neon); text-shadow:0 0 14px rgba(56,225,255,.55); }
+  .brand .bolt { color:var(--neon); }
+  .tagline { color:var(--dim); letter-spacing:.18em; font-size:11px; }
+  .spacer { flex:1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; padding:4px 10px;
+    border:1px solid var(--grid); border-radius:999px; background:#0a111b; }
+  .pill b { color:var(--fg); font-weight:700; }
+  .pill .k { color:var(--dim); }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--dim);
+    box-shadow:0 0 0 0 rgba(0,0,0,0); }
+  .dot.ok { background:var(--green); box-shadow:0 0 10px var(--green); }
+  .dot.bad{ background:var(--red); box-shadow:0 0 10px var(--red); }
+  .dot.warn{ background:var(--yellow); box-shadow:0 0 10px var(--yellow); }
+  .mode { padding:3px 10px; border-radius:6px; font-weight:800; letter-spacing:.12em; }
+  .mode.dry { color:var(--yellow); border:1px solid rgba(255,210,63,.4); background:rgba(255,210,63,.08); }
+  .mode.live{ color:var(--green); border:1px solid rgba(51,246,160,.4); background:rgba(51,246,160,.08); }
+
+  /* Layout */
+  .grid { display:grid; gap:16px; margin-top:16px; }
+  .row2 { grid-template-columns:1.55fr 1fr; }
+  .row2b { grid-template-columns:1fr 1fr; }
+  @media (max-width:980px){ .row2,.row2b{ grid-template-columns:1fr; } }
+
+  .panel { border:1px solid var(--grid); border-radius:12px; background:var(--panel);
+    overflow:hidden; }
+  .panel > h2 { margin:0; padding:10px 14px; font-size:11px; letter-spacing:.2em;
+    color:var(--neon); border-bottom:1px solid var(--grid);
+    background:linear-gradient(180deg, rgba(56,225,255,.06), transparent);
+    text-transform:uppercase; display:flex; align-items:center; gap:8px; }
+  .panel > h2 .sub { color:var(--dim); letter-spacing:.06em; font-weight:400; text-transform:none; }
+  .panel .body { padding:14px; }
+
+  /* Diagram */
+  svg { width:100%; height:auto; display:block; }
+  .node rect { fill:#0c1420; stroke:var(--neon-dim); stroke-width:1.4; rx:9; }
+  .node .title { fill:var(--fg); font-weight:700; font-size:12px; letter-spacing:.05em; }
+  .node .val { fill:var(--neon); font-weight:800; font-size:13px; }
+  .node .lbl { fill:var(--dim); font-size:10px; letter-spacing:.04em; }
+  .node.active rect { stroke:var(--neon); filter:drop-shadow(0 0 8px rgba(56,225,255,.7)); }
+  .node.flash rect { animation:flash .6s ease-out; }
+  .node.ai.active rect { stroke:var(--violet); filter:drop-shadow(0 0 10px rgba(155,140,255,.8)); }
+  @keyframes flash { 0%{ stroke:var(--green); filter:drop-shadow(0 0 14px var(--green)); } 100%{} }
+  .wire { fill:none; stroke:var(--neon-dim); stroke-width:2; opacity:.5; }
+  .flow { fill:none; stroke:var(--neon); stroke-width:2.2; stroke-linecap:round;
+    stroke-dasharray:6 14; opacity:.85; animation:flow 1.1s linear infinite; }
+  .flow.slow { animation-duration:2.4s; opacity:.5; }
+  .flow.retry { stroke:var(--violet); opacity:0; }
+  .flow.retry.on { opacity:.9; }
+  @keyframes flow { to { stroke-dashoffset:-40; } }
+
+  /* Auction / bid */
+  .stat-row { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { flex:1 1 90px; border:1px solid var(--grid); border-radius:9px; padding:8px 10px;
+    background:var(--panel2); }
+  .chip .k { color:var(--dim); font-size:10px; letter-spacing:.08em; }
+  .chip .v { font-size:16px; font-weight:800; color:var(--fg); }
+  .chip.sel { border-color:var(--neon); box-shadow:0 0 0 1px rgba(56,225,255,.35) inset, 0 0 14px rgba(56,225,255,.18); }
+  .chip.sel .v { color:var(--neon); }
+  .bidline { margin-top:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    border-top:1px dashed var(--grid); padding-top:12px; }
+  .bidline .big { font-size:22px; font-weight:800; color:var(--neon); text-shadow:0 0 12px rgba(56,225,255,.4); }
+  .tag { padding:2px 9px; border-radius:999px; font-weight:800; font-size:11px; letter-spacing:.08em; }
+  .tag.quiet{ color:var(--green); border:1px solid rgba(51,246,160,.4); background:rgba(51,246,160,.08); }
+  .tag.mod  { color:var(--yellow); border:1px solid rgba(255,210,63,.4); background:rgba(255,210,63,.08); }
+  .tag.hot  { color:var(--red); border:1px solid rgba(255,93,119,.4); background:rgba(255,93,119,.08); }
+  .tag.none { color:var(--dim); border:1px solid var(--grid); }
+
+  /* Tables */
+  table { width:100%; border-collapse:collapse; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--grid); white-space:nowrap; }
+  th { color:var(--dim); font-weight:600; font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+  td { font-size:12px; }
+  tbody tr:hover { background:rgba(56,225,255,.04); }
+  .scroll { max-height:340px; overflow:auto; }
+  .badge { padding:2px 8px; border-radius:6px; font-size:11px; font-weight:700; }
+  .b-built{ color:var(--dim); border:1px solid var(--grid); }
+  .b-submitted{ color:var(--neon); border:1px solid var(--neon-dim); }
+  .b-processed{ color:var(--yellow); border:1px solid rgba(255,210,63,.4); }
+  .b-confirmed,.b-finalized{ color:var(--green); border:1px solid rgba(51,246,160,.4); }
+  .b-failed{ color:var(--red); border:1px solid rgba(255,93,119,.4); }
+  .muted { color:var(--dim); }
+  .empty { color:var(--dim); text-align:center; padding:26px; }
+
+  /* AI cards */
+  .ai-card { border:1px solid var(--grid); border-left:3px solid var(--violet); border-radius:9px;
+    padding:10px 12px; margin-bottom:10px; background:var(--panel2); }
+  .ai-card .hdr { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .ai-card .cls { font-weight:800; color:var(--violet); }
+  .ai-card .rc { color:var(--fg); margin:6px 0 4px; }
+  .ai-card .fix { color:var(--dim); }
+  .ai-card .fix b { color:var(--neon); font-weight:700; }
+  .o-resubmitted{ color:var(--green); }
+  .o-aborted_landed,.o-aborted_guardrail,.o-aborted_no_retry{ color:var(--yellow); }
+  .o-analyst_error{ color:var(--red); }
+
+  /* Aggregate */
+  .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  @media (max-width:760px){ .stats-grid{ grid-template-columns:repeat(2,1fr); } }
+  .metric { border:1px solid var(--grid); border-radius:10px; padding:12px; background:var(--panel2); }
+  .metric .k { color:var(--dim); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+  .metric .v { font-size:22px; font-weight:800; margin-top:4px; }
+  .bar { height:8px; border-radius:999px; background:#0a111b; overflow:hidden; margin-top:8px; border:1px solid var(--grid); }
+  .bar > i { display:block; height:100%; background:linear-gradient(90deg,var(--neon),var(--green)); width:0; transition:width .4s ease; }
+  .cont-row { display:flex; align-items:center; gap:10px; margin:6px 0; }
+  .cont-row .nm { width:120px; color:var(--fg); overflow:hidden; text-overflow:ellipsis; }
+  .cont-row .meter { flex:1; height:10px; border-radius:999px; background:#0a111b; border:1px solid var(--grid); overflow:hidden; }
+  .cont-row .meter > i { display:block; height:100%; width:0; transition:width .3s ease; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <div class="brand"><span class="bolt">⚡</span> T U R B I N E</div>
+      <div class="tagline">ULTRA · LOW · LATENCY · SMART · EXECUTION</div>
+    </div>
+    <span id="mode" class="mode dry">DRY-RUN</span>
+    <div class="spacer"></div>
+    <span class="pill"><span class="k">SLOT</span> <b id="slot">—</b></span>
+    <span class="pill"><span class="k">LEADER</span> <b id="leader">—</b></span>
+    <span class="pill"><span class="dot" id="d-geyser"></span> GEYSER</span>
+    <span class="pill"><span class="dot" id="d-jito"></span> JITO</span>
+    <span class="pill"><span class="dot" id="d-conn"></span> <b id="conn">connecting…</b></span>
+  </div>
+
+  <!-- Section A: pipeline + auction -->
+  <div class="grid row2">
+    <div class="panel">
+      <h2>Architecture <span class="sub">live packet flow · ingest → gate → execute · AI retry loop</span></h2>
+      <div class="body">
+        <svg id="diagram" viewBox="0 0 920 320" preserveAspectRatio="xMidYMid meet">
+          <!-- wires (base) -->
+          <path class="wire" d="M170,90 H250"/>
+          <path class="wire" d="M420,90 H500"/>
+          <path class="wire" d="M335,118 V190 H170 V150"/>
+          <path class="wire" d="M585,118 V190 H760 V118"/>
+          <path class="wire" d="M670,90 H760"/>
+          <!-- AI retry loop wire -->
+          <path class="wire" d="M760,210 V270 H585 V210"/>
+          <!-- animated flows -->
+          <path class="flow" d="M170,90 H250"/>
+          <path class="flow" d="M420,90 H500"/>
+          <path class="flow slow" d="M335,118 V190 H170 V150"/>
+          <path class="flow slow" d="M585,118 V190 H760 V118"/>
+          <path class="flow" d="M670,90 H760"/>
+          <path class="flow retry" id="retry-flow" d="M760,270 H585 V210"/>
+
+          <!-- GEYSER -->
+          <g class="node" id="n-geyser"><rect x="40" y="55" width="130" height="70"/>
+            <text class="title" x="56" y="80">GEYSER</text>
+            <text class="lbl" x="56" y="98">ingest</text>
+            <text class="val" x="56" y="116" id="g-interval">— ms/slot</text></g>
+          <!-- PROCESS -->
+          <g class="node" id="n-process"><rect x="250" y="55" width="170" height="70"/>
+            <text class="title" x="266" y="80">PROCESS</text>
+            <text class="lbl" x="266" y="98">write-lock extract</text>
+            <text class="val" x="266" y="116" id="g-cong">QUIET</text></g>
+          <!-- FEE + GATE -->
+          <g class="node" id="n-gate"><rect x="500" y="55" width="170" height="70"/>
+            <text class="title" x="516" y="80">FEE · GATE</text>
+            <text class="lbl" x="516" y="98">percentile select</text>
+            <text class="val" x="516" y="116" id="g-bid">P25 · —</text></g>
+          <!-- EXECUTE -->
+          <g class="node" id="n-exec"><rect x="760" y="55" width="120" height="70"/>
+            <text class="title" x="776" y="80">EXECUTE</text>
+            <text class="lbl" x="776" y="98">Jito bundle</text>
+            <text class="val" x="776" y="116" id="g-inflight">0 live</text></g>
+          <!-- HOT STATE -->
+          <g class="node" id="n-state"><rect x="40" y="150" width="130" height="60"/>
+            <text class="title" x="56" y="174">HOT STATE</text>
+            <text class="lbl" x="56" y="192">lock-free snapshots</text></g>
+          <!-- AI -->
+          <g class="node ai" id="n-ai"><rect x="585" y="210" width="175" height="64"/>
+            <text class="title" x="601" y="234">AI ANALYST</text>
+            <text class="lbl" x="601" y="252">classify · fix · resubmit</text>
+            <text class="val" x="601" y="268" id="g-ai" style="fill:var(--violet)">0 decisions</text></g>
+        </svg>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Jito Auction <span class="sub">lamports · live bid</span></h2>
+      <div class="body">
+        <div class="stat-row">
+          <div class="chip" id="c-p25"><div class="k">P25</div><div class="v" data-p="P25">—</div></div>
+          <div class="chip" id="c-p50"><div class="k">P50</div><div class="v" data-p="P50">—</div></div>
+          <div class="chip" id="c-p75"><div class="k">P75</div><div class="v" data-p="P75">—</div></div>
+        </div>
+        <div class="stat-row" style="margin-top:10px">
+          <div class="chip" id="c-p95"><div class="k">P95</div><div class="v" data-p="P95">—</div></div>
+          <div class="chip" id="c-p99"><div class="k">P99</div><div class="v" data-p="P99">—</div></div>
+        </div>
+        <div class="bidline">
+          <span class="k muted">BID</span>
+          <span class="big"><span id="bid-pct">P25</span> · <span id="bid-tip">—</span></span>
+          <span id="bid-tag" class="tag none">◦ NO SIGNAL</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section B + C -->
+  <div class="grid row2">
+    <div class="panel">
+      <h2>Transaction History <span class="sub">per-bundle lifecycle · explorer · state deltas (ms)</span></h2>
+      <div class="body" style="padding:0">
+        <div class="scroll">
+          <table>
+            <thead><tr>
+              <th>State</th><th>Signature</th><th>Tier</th><th>Tip Δ</th>
+              <th>Slot</th><th>Att</th><th>S→P</th><th>P→C</th><th>C→F</th>
+            </tr></thead>
+            <tbody id="tx-body"><tr><td colspan="9" class="empty">No bundles yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>AI Reasoning <span class="sub">classification · root cause · fix · outcome</span></h2>
+      <div class="body scroll" id="ai-log"><div class="empty">No AI decisions yet.</div></div>
+    </div>
+  </div>
+
+  <!-- Section D -->
+  <div class="grid row2b">
+    <div class="panel">
+      <h2>Aggregate Stats</h2>
+      <div class="body">
+        <div class="stats-grid">
+          <div class="metric"><div class="k">Success rate</div><div class="v" id="m-success">0%</div>
+            <div class="bar"><i id="m-success-bar"></i></div></div>
+          <div class="metric"><div class="k">Tracked</div><div class="v" id="m-tracked">0</div></div>
+          <div class="metric"><div class="k">In-flight</div><div class="v" id="m-inflight">0</div></div>
+          <div class="metric"><div class="k">Landed</div><div class="v" id="m-landed" style="color:var(--green)">0</div></div>
+          <div class="metric"><div class="k">Failed</div><div class="v" id="m-failed" style="color:var(--red)">0</div></div>
+          <div class="metric"><div class="k">AI decisions</div><div class="v" id="m-ai" style="color:var(--violet)">0</div></div>
+          <div class="metric"><div class="k">Resubmits</div><div class="v" id="m-resub">0</div></div>
+          <div class="metric"><div class="k">Tip spend</div><div class="v" id="m-spend">0</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Contention <span class="sub">per watched account · write-lock z-score</span></h2>
+      <div class="body" id="cont-body"><div class="empty">No watched accounts configured.</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => (n === null || n === undefined) ? "—" : Number(n).toLocaleString("en-US");
+  const fmtDelta = (d, floor, paid) => {
+    if (d === null || d === undefined) return paid != null ? fmt(paid) : "—";
+    const tip = d > 0 ? `+${fmt(d)}` : fmt(d);
+    if (floor != null && paid != null) {
+      return `<span title="floor ${fmt(floor)} · paid ${fmt(paid)}">${tip}</span>`;
+    }
+    return tip;
+  };
+  const ms  = (v) => (v === null || v === undefined) ? "—" : (Math.round(v*10)/10) + "";
+
+  const contention = new Map(); // account -> {z, level}
+  let lastAiCount = 0;
+
+  // ---- node activity helpers ----
+  function flash(id){ const n=$(id); if(!n) return; n.classList.remove("flash"); void n.offsetWidth; n.classList.add("flash"); }
+  function active(id, on){ const n=$(id); if(n) n.classList.toggle("active", !!on); }
+
+  // ---- WebSocket ----
+  function connect(){
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/stream`);
+    ws.onopen = () => { $("d-conn").className = "dot ok"; $("conn").textContent = "live"; };
+    ws.onclose = () => { $("d-conn").className = "dot bad"; $("conn").textContent = "reconnecting…"; setTimeout(connect, 1200); };
+    ws.onerror = () => ws.close();
+    ws.onmessage = (e) => { try { handle(JSON.parse(e.data)); } catch (_) {} };
+  }
+
+  function handle(msg){
+    const d = msg.data || {};
+    switch (msg.kind){
+      case "meta":
+        setMode(d.dry_run);
+        $("d-jito").className = "dot " + (d.jito_connected ? "ok" : "warn");
+        break;
+      case "slot":
+        $("slot").textContent = fmt(d.slot);
+        if (d.interval_ms != null) $("g-interval").textContent = d.interval_ms + " ms/slot";
+        flash("n-geyser"); active("n-process", true);
+        break;
+      case "leader":
+        $("leader").textContent = "#" + fmt(d.next_jito_leader_slot) + (d.slots_until!=null ? `  (${d.slots_until})` : "");
+        break;
+      case "health":
+        $("d-geyser").className = "dot " + (d.geyser ? "ok" : "bad");
+        $("d-jito").className   = "dot " + (d.jito ? "ok" : "warn");
+        active("n-geyser", d.geyser);
+        break;
+      case "tip_snapshot":
+        document.querySelectorAll('[data-p]').forEach(el => {
+          const key = el.getAttribute("data-p").toLowerCase();
+          if (d[key] != null) el.textContent = fmt(d[key]);
+        });
+        break;
+      case "bid":
+        $("bid-pct").textContent = d.percentile;
+        $("bid-tip").textContent = fmt(d.tip_lamports);
+        $("g-bid").textContent = d.percentile + " · " + fmt(d.tip_lamports);
+        $("g-cong").textContent = (d.congestion || "quiet").toUpperCase();
+        setBidTag(d.congestion, d.watching);
+        highlightTier(d.percentile);
+        active("n-gate", true);
+        break;
+      case "contention":
+        contention.set(d.account, { z: d.zscore, level: d.level });
+        renderContention();
+        break;
+      case "stats":
+        $("g-inflight").textContent = fmt(d.in_flight) + " live";
+        break;
+      case "history":
+        renderHistory(d);
+        break;
+    }
+  }
+
+  function setMode(dry){
+    const m = $("mode");
+    m.className = "mode " + (dry ? "dry" : "live");
+    m.textContent = dry ? "DRY-RUN" : "LIVE";
+  }
+
+  function setBidTag(cong, watching){
+    const t = $("bid-tag");
+    if (!watching){ t.className = "tag none"; t.textContent = "◦ NO SIGNAL"; return; }
+    const c = (cong||"quiet").toLowerCase();
+    if (c==="hot"){ t.className="tag hot"; t.textContent="● HOT"; }
+    else if (c==="moderate"){ t.className="tag mod"; t.textContent="● MODERATE"; }
+    else { t.className="tag quiet"; t.textContent="● QUIET"; }
+  }
+
+  function highlightTier(pct){
+    ["P25","P50","P75","P95","P99"].forEach(p => {
+      const chip = $("c-"+p.toLowerCase());
+      if (chip) chip.classList.toggle("sel", p === pct);
+    });
+  }
+
+  function renderContention(){
+    const box = $("cont-body");
+    if (contention.size === 0){ box.innerHTML = '<div class="empty">No watched accounts configured.</div>'; return; }
+    const color = (lvl) => lvl==="hot" ? "var(--red)" : lvl==="moderate" ? "var(--yellow)" : "var(--green)";
+    let html = "";
+    for (const [acct, v] of contention){
+      const lvl = (v.level||"quiet").toLowerCase();
+      const pct = Math.max(4, Math.min(100, (Math.abs(v.z)/4)*100));
+      html += `<div class="cont-row"><span class="nm">${acct}</span>
+        <span class="meter"><i style="width:${pct}%;background:${color(lvl)}"></i></span>
+        <span class="muted">z=${(v.z>=0?"+":"")+ (Math.round(v.z*10)/10)}</span>
+        <span class="tag ${lvl==='hot'?'hot':lvl==='moderate'?'mod':'quiet'}">${lvl.toUpperCase()}</span></div>`;
+    }
+    box.innerHTML = html;
+  }
+
+  function explorer(sig){ return `https://explorer.solana.com/tx/${sig}`; }
+  function shortSig(sig){ return sig ? sig.slice(0,8) + "…" + sig.slice(-6) : "—"; }
+
+  function failureLabel(b) {
+    if (b.ai_classification) return b.ai_classification.replace(/_/g, " ");
+    return null;
+  }
+
+  function renderHistory(d){
+    // Section B — tx table
+    const tb = $("tx-body");
+    const bundles = d.bundles || [];
+    if (bundles.length === 0){ tb.innerHTML = '<tr><td colspan="9" class="empty">No bundles yet.</td></tr>'; }
+    else {
+      tb.innerHTML = bundles.map(b => {
+        const st = String(b.state).toLowerCase();
+        const sig = b.signature
+          ? `<a href="${explorer(b.signature)}" target="_blank" rel="noopener">${shortSig(b.signature)}</a>`
+          : '<span class="muted">—</span>';
+        const label = failureLabel(b);
+        const err = label ? ` <span class="muted">(${label})</span>` : "";
+        return `<tr>
+          <td><span class="badge b-${st}">${b.state}</span>${err}</td>
+          <td>${sig}</td>
+          <td>${b.percentile || '<span class="muted">—</span>'}</td>
+          <td>${fmtDelta(b.tip_delta_lamports, b.tip_floor_lamports, b.tip_lamports)}</td>
+          <td>${b.landed_slot!=null ? fmt(b.landed_slot) : '<span class="muted">—</span>'}</td>
+          <td>${b.attempt}</td>
+          <td>${ms(b.submit_to_processed_ms)}</td>
+          <td>${ms(b.processed_to_confirmed_ms)}</td>
+          <td>${ms(b.confirmed_to_finalized_ms)}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    // Section C — AI reasoning
+    const log = $("ai-log");
+    const ai = d.ai || [];
+    if (ai.length === 0){ log.innerHTML = '<div class="empty">No AI decisions yet.</div>'; }
+    else {
+      log.innerHTML = ai.map(r => {
+        const o = String(r.outcome);
+        const when = new Date(r.at_ms).toLocaleTimeString();
+        return `<div class="ai-card">
+          <div class="hdr"><span class="cls">${r.classification}</span>
+            <span class="muted">attempt ${r.attempt}</span>
+            <span class="o-${o}">${o.replace(/_/g,' ')}</span>
+            <span class="muted">· conf ${(r.confidence*100).toFixed(0)}% · ${when}</span></div>
+          <div class="rc">${r.root_cause}</div>
+          <div class="fix"><b>fix:</b> ${r.fix}</div>
+        </div>`;
+      }).join("");
+    }
+    // Illuminate the AI node + retry wire when a new decision lands.
+    if (ai.length > lastAiCount){
+      const n = $("n-ai"); n.classList.add("active");
+      const rf = $("retry-flow"); rf.classList.add("on");
+      flash("n-exec");
+      setTimeout(() => { n.classList.remove("active"); rf.classList.remove("on"); }, 1600);
+    }
+    lastAiCount = ai.length;
+
+    // Section D — aggregate
+    const a = d.aggregate || {};
+    const rate = Math.round((a.success_rate||0)*100);
+    $("m-success").textContent = rate + "%";
+    $("m-success-bar").style.width = rate + "%";
+    $("m-tracked").textContent  = fmt(a.tracked);
+    $("m-inflight").textContent = fmt(a.in_flight);
+    $("m-landed").textContent   = fmt(a.landed);
+    $("m-failed").textContent   = fmt(a.failed);
+    $("m-ai").textContent       = fmt(a.ai_decisions);
+    $("m-resub").textContent    = fmt(a.resubmits);
+    $("m-spend").textContent    = fmt(a.tip_spend_lamports);
+    $("g-ai").textContent       = fmt(a.ai_decisions) + " decisions";
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>

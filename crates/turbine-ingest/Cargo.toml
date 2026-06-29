@@ -1,0 +1,24 @@
+[package]
+name = "turbine-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TURBINE data ingestion: Yellowstone/Geyser streams + Jito tip feed"
+
+[dependencies]
+turbine-core = { workspace = true }
+
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+solana-pubkey = { workspace = true }
+
+tonic = { workspace = true }
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+yellowstone-grpc-client = { workspace = true }
+yellowstone-grpc-proto = { workspace = true }
