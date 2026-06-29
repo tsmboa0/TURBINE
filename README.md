@@ -29,9 +29,7 @@ Turbine is an ultra-low latency smart transaction infrastructure for Solana that
 - **Single Tokio multi-thread runtime** with explicit hot / warm / cold lanes — not separate processes pretending to be fast.
 - **Lock-free hot reads**: `ArcSwap` snapshots, sharded `DashMap`, and atomics — the submit path never takes a global mutex.
 - **Zero RPC on submit**: blockhash, leader schedule, and tip percentiles are warmed in background tasks; execution reads memory at gate + compile time.
-- **Bounded backpressure**: Geyser uses `mpsc(8192)`; slow consumers apply 
-pressure upstream instead of ballooning RAM.
-- **Geyser stream discipline:** account-filtered subs + dedicated reader + lightweight DPU — we drain fast so the provider never sees a stalled consumer.
+- **Provider-safe backpressure:** bounded `mpsc(8192)` — no unbounded RAM; account-filtered subs + dedicated Geyser reader + lightweight DPU keep the stream draining so the **provider never sees a stalled consumer** (slow internal consumers block on `send`, not at the cost of disconnecting your feed).
 - **Custom Jito Searcher gRPC client** generated from vendored `.proto` files (`tonic-build`) — no foreign SDK pin on the hot path.
 
 ### 2. Tip pricing: write-lock contention, not guesswork.
@@ -54,18 +52,24 @@ Raw tip WebSocket ticks and per-slot hit counts are noisy. TURBINE uses **time-d
 
 This avoids overpaying on one outlier tip tick and avoids misclassifying a permanently busy pool as permanently "Hot."
 
+### 4. Deliberate scope — what we left out of the hot path
+
+- **AI is never on the hot path.** Even an optimized LLM call (400–500 ms) is long enough to **miss a target slot** on Solana — where 200 ms of extra latency can cost inclusion. Failures route to a cold `mpsc` lane; the coordinator rebuilds and resubmits **after** the gate window, without stalling Geyser ingestion or submit.
+
+- **No deshred in production.** We tested deshred and confirmed pre-processed block data was available earlier than standard Geyser paths — but left it out of this build to **stay in scope**. TURBINE standardizes on Yellowstone/Geyser + Jito; deshred remains a future latency experiment, not a dependency.
+
 
 ## Quick Ultra-Low-Latency Proof
 
-Five **mainnet** bundles from live `transactions.jsonl` runs (`happy-path-single-tx`, attempt 0, finalized).
+Five **mainnet** bundles from live `transactions.jsonl` runs (`happy-path-single-tx`, attempt 0, finalized), ranked by **smallest tip paid**.
 
 | Signature | Submitted (UTC) | Submit slot | Landed slot | Submit → Processed | Processed → Confirmed | Confirmed → Finalized | Tip (◎) | Tip Δ |
 |-----------|-----------------|-------------|-------------|--------------------|-----------------------|----------------------|---------|-------|
-| [`29jS…zKST`](https://solscan.io/tx/29jSJFwbLFR7oejDNuSNJJRFZib6fpZSzBeZBCsKwDjS4Heserv6C6i4e6gwYLFgF6zYEH6Cs9DEcynYUmC8zKST) | 2026-06-28 10:24:42 | 429,433,061 | 429,433,063 | **279 ms** | 410 ms | 11,834 ms | 0.000013131 | +1,193 |
+| [`3VrK…9kpo`](https://solscan.io/tx/3VrKDx5d7JzrmMF3fCJRmhLJUYUMcfpA1yiXvBPdEh9D433PScNGxnEU7TvMbXaiNdBTwfj7FfbNZEumxzzR9kpo) | 2026-06-28 07:52:40 | 429,410,365 | 429,410,367 | **355 ms** | 294 ms | 13,979 ms | 0.000010000 | −17,377 |
+| [`4dXU…79F2`](https://solscan.io/tx/4dXUu39qoxqP2fnBzczabswFv2HpkZVrJYVTUxS7nYVEBqyJittaZ5gt1gnjmTH2Wfo5AiGek3LXr5L9FDE79F2) | 2026-06-28 08:37:03 | 429,416,991 | 429,416,992 | **373 ms** | 199 ms | 12,529 ms | 0.000011674 | +1,061 |
 | [`46CB…5AHC`](https://solscan.io/tx/46CBfMz3U9emUUVvB9NyeZvpsBSnShZTpzXuia5yV5eKbFsnN6kt3FgkzDwhesVU3SpVg3CQPC3Sfgn2EZBV5AHC) | 2026-06-28 11:05:37 | 429,439,175 | 429,439,177 | **315 ms** | 216 ms | 12,162 ms | 0.000012675 | +1,152 |
-| [`3UWS…7GJz`](https://solscan.io/tx/3UWSfLfDyqKwTWxU4pSsgqgnn43DdQCUV8aHvAVUL1ZD8GL3oAWfxqBXQzs5HZNiiHDgacPwhzDWceyWhWCW7GJz) | 2026-06-28 08:36:32 | 429,416,917 | 429,416,919 | **345 ms** | 405 ms | 13,135 ms | 0.000018111 | — |
-| [`3VrK…9kpo`](https://solscan.io/tx/3VrKDx5d7JzrmMF3fCJRmhLJUYUMcfpA1yiXvBPdEh9D433PScNGxnEU7TvMbXaiNdBTwfj7FfbNZEumxzzR9kpo) | 2026-06-28 07:52:40 | 429,410,365 | 429,410,367 | **355 ms** | 294 ms | 13,979 ms | 0.000010000 | — |
-| [`4dXU…79F2`](https://solscan.io/tx/4dXUu39qoxqP2fnBzczabswFv2HpkZVrJYVTUxS7nYVEBqyJittaZ5gt1gnjmTH2Wfo5AiGek3LXr5L9FDE79F2) | 2026-06-28 08:37:03 | 429,416,991 | 429,416,992 | **373 ms** | 199 ms | 12,529 ms | 0.000011674 | — |
+| [`29jS…zKST`](https://solscan.io/tx/29jSJFwbLFR7oejDNuSNJJRFZib6fpZSzBeZBCsKwDjS4Heserv6C6i4e6gwYLFgF6zYEH6Cs9DEcynYUmC8zKST) | 2026-06-28 10:24:42 | 429,433,061 | 429,433,063 | **279 ms** | 410 ms | 11,834 ms | 0.000013131 | +1,193 |
+| [`3UWS…7GJz`](https://solscan.io/tx/3UWSfLfDyqKwTWxU4pSsgqgnn43DdQCUV8aHvAVUL1ZD8GL3oAWfxqBXQzs5HZNiiHDgacPwhzDWceyWhWCW7GJz) | 2026-06-28 08:36:32 | 429,416,917 | 429,416,919 | **345 ms** | 405 ms | 13,135 ms | 0.000018111 | +1,646 |
 
 **Takeaway:** Sub-400 ms submit→processed on mainnet with **~0.00001–0.000018 SOL** tips — gated one slot before the Jito leader (`gate_dist = 1` on every row). 
 
@@ -269,28 +273,27 @@ flowchart LR
 
 ## Live Transactions Summary
 
-Mainnet audit log excerpt — happy paths, AI-recovered failures, and idempotency catches. Lamports shown as SOL (÷ 10⁹).
+Mainnet audit log excerpt — happy paths, AI-recovered failures, and idempotency catches. Lamports shown as SOL (÷ 10⁹). Latency columns in **ms**: S→P (submit→processed), P→C (processed→confirmed), C→F (confirmed→finalized).
 
-| Label | Att | State | Signature | Slot | Tip (◎) | S→P (ms) | AI class | Retry fix |
-|-------|-----|-------|-----------|------|---------|----------|----------|-----------|
-| happy-path-single-tx | 0 | Finalized | [`29jS…zKST`](https://solscan.io/tx/29jSJFwbLFR7oejDNuSNJJRFZib6fpZSzBeZBCsKwDjS4Heserv6C6i4e6gwYLFgF6zYEH6Cs9DEcynYUmC8zKST) | 429,433,061 | 0.000013 | 279 | — | — |
-| happy-path-single-tx | 0 | Finalized | [`46CB…5AHC`](https://solscan.io/tx/46CBfMz3U9emUUVvB9NyeZvpsBSnShZTpzXuia5yV5eKbFsnN6kt3FgkzDwhesVU3SpVg3CQPC3Sfgn2EZBV5AHC) | 429,439,175 | 0.000013 | 315 | — | — |
-| happy-path-single-tx | 0 | Finalized | [`3VrK…9kpo`](https://solscan.io/tx/3VrKDx5d7JzrmMF3fCJRmhLJUYUMcfpA1yiXvBPdEh9D433PScNGxnEU7TvMbXaiNdBTwfj7FfbNZEumxzzR9kpo) | 429,410,365 | 0.000010 | 355 | — | — |
-| fail-path-blockhash | 0 | Failed | [`41YS…HxyK`](https://solscan.io/tx/41YSb5W4kehfErCKqBr5G84Za45dyGQE1KdEeuo7R81DZj6HDwfq3AMYYZ4UEaQsbnqTB45921WeJQ43SM9iHxyK) | 429,433,159 | 0.000011 | — | blockhash_expired | fresh blockhash, rebuild |
-| fail-path-blockhash | 1 | Finalized | [`4GiT…T9iU`](https://solscan.io/tx/4GiTnpZ1dkraZ9geig5uHKPxCaCe2NAZJNvwHXQGg6c97L9Asb2p45T6J98GkaLiQ4g47fNpfNZvJxRovG6aT9iU) | 429,433,189 | 0.000020 | 506 | — | — |
-| fail-path-blockhash | 3 | Finalized | [`3ZMs…f5JK`](https://solscan.io/tx/3ZMskJVoBCf86R7euN183BXDPQ3v16R8qiKH46tUvpKZjjufSZzRsUq9ZQbyiGHzDR9uvZ6AndWEG6ayRJ9Pf5JK) | 429,439,054 | 0.000015 | 1,112 | — | — |
-| fail-path-tip | 0 | Failed | [`62BT…4Yhw`](https://solscan.io/tx/62BTLTJuZfAUHLiTF5XbXErTSmVDA3CybbpNVKE9rfSMkfyCmB78BrN1at5J91jVXmU2BcVKxBKA86AyeAsG4Yhw) | 429,438,792 | 0.000000001 | — | tip_too_low | tip +30%, rebuild |
-| fail-path-tip | 2 | Finalized | [`3vFZ…VAcu`](https://solscan.io/tx/3vFZu5H9fXwo2cokYZRMes1iF7DncccqVfqmKssxPq6LujzbRyzChvMAU2ukn37yVo6ENbvSPxeiqKfU2nFmVAcu) | 429,436,541 | 0.000020 | 270 | — | — |
-| happy-path-single-tx | 0 | Failed* | [`2reU…bZoT`](https://solscan.io/tx/2reUaKGWqXTRJqS6D15hFwnKajG8SZv5E5GXGFZfq9JeuXdojnvMa96mqjKgudCSkJVnqLG2U4GGYQCVvPbgbZoT) | 429,366,967 | 0.000010 | 680 | landed | idempotency abort |
-| happy-path-single-tx | 1 | Finalized | [`5UrH…5c5`](https://solscan.io/tx/5UrHb2BX2hRih5o6ViswX1FEZ4zwnjFEm8eRtBuacDDUJhjxE1Fm92Nv8NVF8CnuoYeKnqR9j157cZXHpwGyd5c5) | 429,415,374 | 0.000020 | 539 | auction_timeout | tip +20%, rebuild |
-| happy-path-single-tx | 1 | Finalized | [`3sL3…JfFe`](https://solscan.io/tx/3sL3cD1NEt1rtCpnRhehHsUMAyzCymzbhFvYG3baQoo1XSG4kEDFYW9m954LmpWBXVKnHWr9viay9G4PxUN6JfFe) | 429,416,429 | 0.000020 | 268 | — | — |
-| happy-path-single-tx | 0 | Finalized | [`3UWS…7GJz`](https://solscan.io/tx/3UWSfLfDyqKwTWxU4pSsgqgnn43DdQCUV8aHvAVUL1ZD8GL3oAWfxqBXQzs5HZNiiHDgacPwhzDWceyWhWCW7GJz) | 429,416,917 | 0.000018 | 345 | — | — |
-| happy-path | 1 | Finalized | [`3xM3…ARkY`](https://solscan.io/tx/3xM3iyXmVmpAUHUbW1bCrVtYsz9NUkZWMnt1M5SCniHxksaEnEtM5tcr3qGqqvCAg1KSr8bB6ZdtePYr8SNRARkY) | 429,410,469 | 0.000200 | 655 | auction_timeout | tip bump + rebuild |
-| fail-path-blockhash | 1 | Finalized | [`4WQk…fREy`](https://solscan.io/tx/4WQkmrsFke7AWrMSzzAeHW7qNwU3AkUfxjxZK7vTC5QPHfcfJVpVitB4RhGM2VR4BE2YNLgug3Wrs82VM82cfREy) | 429,436,271 | 0.000020 | 276 | — | — |
-| happy-path-single-tx | 1 | Finalized | [`5HUp…mWTD`](https://solscan.io/tx/5HUpXRBqxr7QFCqWUd277YTQhGVaxyFeQCNcmLWkDKC7J17EHx3EwoyVFJWXdErg8u3R8jTSdip8PLnxgkmfmWTD) | 429,411,815 | 0.000200 | 270 | — | — |
-| happy-path-single-tx | 0 | Finalized | [`4ERL…7w5a`](https://solscan.io/tx/4ERLWkmPtdekXt2kqYngctbfTsJpj8g7kVCi8JqttywxtFtXPUhJR7iou6CHBNBVaotuVTuR5drYxw4A2ycJ7w5a) | 429,518,646 | 0.000005 | — | — | — |
-| happy-path-single-tx | 0 | Failed | [`b1a8…58cb`](https://solscan.io/tx/b1a8e096f5f0fca7651475966e813adfbad47632fb269ec1d445a295123158cb) | 429,518,646 | 0.000005 | — | auction_timeout | tip +20%, resubmitted |
-| happy-path-single-tx | 3 | Failed | [`617h…LQg8`](https://solscan.io/tx/617hki66UzqD5DR2j9AzppPewgWN9WoKcJoTaUu4XudzXZmq5h1JDRB7LP4arzGMQNWBNW63nMj2m62T7divLQg8) | 429,518,731 | 0.000007 | — | exhausted | retry budget hit |
+| Label | Att | State | Signature | Slot | Tip (◎) | S→P | P→C | C→F | AI class | Retry fix |
+|-------|-----|-------|-----------|------|---------|-----|-----|-----|----------|-----------|
+| happy-path-single-tx | 0 | Finalized | [`29jS…zKST`](https://solscan.io/tx/29jSJFwbLFR7oejDNuSNJJRFZib6fpZSzBeZBCsKwDjS4Heserv6C6i4e6gwYLFgF6zYEH6Cs9DEcynYUmC8zKST) | 429,433,061 | 0.000013 | 279 | 410 | 11,834 | — | — |
+| happy-path-single-tx | 0 | Finalized | [`46CB…5AHC`](https://solscan.io/tx/46CBfMz3U9emUUVvB9NyeZvpsBSnShZTpzXuia5yV5eKbFsnN6kt3FgkzDwhesVU3SpVg3CQPC3Sfgn2EZBV5AHC) | 429,439,175 | 0.000013 | 315 | 216 | 12,162 | — | — |
+| happy-path-single-tx | 0 | Finalized | [`3VrK…9kpo`](https://solscan.io/tx/3VrKDx5d7JzrmMF3fCJRmhLJUYUMcfpA1yiXvBPdEh9D433PScNGxnEU7TvMbXaiNdBTwfj7FfbNZEumxzzR9kpo) | 429,410,365 | 0.000010 | 355 | 294 | 13,979 | — | — |
+| fail-path-blockhash | 0 | Failed | [`41YS…HxyK`](https://solscan.io/tx/41YSb5W4kehfErCKqBr5G84Za45dyGQE1KdEeuo7R81DZj6HDwfq3AMYYZ4UEaQsbnqTB45921WeJQ43SM9iHxyK) | 429,433,159 | 0.000011 | — | — | — | blockhash_expired | fresh blockhash, rebuild |
+| fail-path-blockhash | 1 | Finalized | [`4GiT…T9iU`](https://solscan.io/tx/4GiTnpZ1dkraZ9geig5uHKPxCaCe2NAZJNvwHXQGg6c97L9Asb2p45T6J98GkaLiQ4g47fNpfNZvJxRovG6aT9iU) | 429,433,189 | 0.000020 | 506 | 259 | 12,212 | — | — |
+| fail-path-blockhash | 3 | Finalized | [`3ZMs…f5JK`](https://solscan.io/tx/3ZMskJVoBCf86R7euN183BXDPQ3v16R8qiKH46tUvpKZjjufSZzRsUq9ZQbyiGHzDR9uvZ6AndWEG6ayRJ9Pf5JK) | 429,439,054 | 0.000015 | 1,112 | 147 | 12,217 | — | — |
+| fail-path-tip | 0 | Failed | [`62BT…4Yhw`](https://solscan.io/tx/62BTLTJuZfAUHLiTF5XbXErTSmVDA3CybbpNVKE9rfSMkfyCmB78BrN1at5J91jVXmU2BcVKxBKA86AyeAsG4Yhw) | 429,438,792 | 0.000000001 | — | — | — | tip_too_low | tip +30%, rebuild |
+| fail-path-tip | 2 | Finalized | [`3vFZ…VAcu`](https://solscan.io/tx/3vFZu5H9fXwo2cokYZRMes1iF7DncccqVfqmKssxPq6LujzbRyzChvMAU2ukn37yVo6ENbvSPxeiqKfU2nFmVAcu) | 429,436,541 | 0.000020 | 270 | 128 | 12,690 | — | — |
+| happy-path-single-tx | 0 | Failed* | [`2reU…bZoT`](https://solscan.io/tx/2reUaKGWqXTRJqS6D15hFwnKajG8SZv5E5GXGFZfq9JeuXdojnvMa96mqjKgudCSkJVnqLG2U4GGYQCVvPbgbZoT) | 429,366,967 | 0.000010 | 680 | — | — | landed | idempotency abort |
+| happy-path-single-tx | 1 | Finalized | [`5UrH…5c5`](https://solscan.io/tx/5UrHb2BX2hRih5o6ViswX1FEZ4zwnjFEm8eRtBuacDDUJhjxE1Fm92Nv8NVF8CnuoYeKnqR9j157cZXHpwGyd5c5) | 429,415,374 | 0.000020 | 539 | 426 | 12,066 | auction_timeout | tip +20%, rebuild |
+| happy-path-single-tx | 1 | Finalized | [`3sL3…JfFe`](https://solscan.io/tx/3sL3cD1NEt1rtCpnRhehHsUMAyzCymzbhFvYG3baQoo1XSG4kEDFYW9m954LmpWBXVKnHWr9viay9G4PxUN6JfFe) | 429,416,429 | 0.000020 | 268 | 511 | 11,935 | — | — |
+| happy-path-single-tx | 0 | Finalized | [`3UWS…7GJz`](https://solscan.io/tx/3UWSfLfDyqKwTWxU4pSsgqgnn43DdQCUV8aHvAVUL1ZD8GL3oAWfxqBXQzs5HZNiiHDgacPwhzDWceyWhWCW7GJz) | 429,416,917 | 0.000018 | 345 | 405 | 13,135 | — | — |
+| happy-path | 1 | Finalized | [`3xM3…ARkY`](https://solscan.io/tx/3xM3iyXmVmpAUHUbW1bCrVtYsz9NUkZWMnt1M5SCniHxksaEnEtM5tcr3qGqqvCAg1KSr8bB6ZdtePYr8SNRARkY) | 429,410,469 | 0.000200 | 655 | 224 | 12,523 | auction_timeout | tip bump + rebuild |
+| fail-path-blockhash | 1 | Finalized | [`4WQk…fREy`](https://solscan.io/tx/4WQkmrsFke7AWrMSzzAeHW7qNwU3AkUfxjxZK7vTC5QPHfcfJVpVitB4RhGM2VR4BE2YNLgug3Wrs82VM82cfREy) | 429,436,271 | 0.000020 | 276 | 151 | 13,197 | — | — |
+| happy-path-single-tx | 1 | Finalized | [`5HUp…mWTD`](https://solscan.io/tx/5HUpXRBqxr7QFCqWUd277YTQhGVaxyFeQCNcmLWkDKC7J17EHx3EwoyVFJWXdErg8u3R8jTSdip8PLnxgkmfmWTD) | 429,411,815 | 0.000200 | 270 | 332 | 12,346 | — | — |
+| happy-path-single-tx | 0 | Failed | [`4ERL…7w5a`](https://solscan.io/tx/4ERLWkmPtdekXt2kqYngctbfTsJpj8g7kVCi8JqttywxtFtXPUhJR7iou6CHBNBVaotuVTuR5drYxw4A2ycJ7w5a) | 429,518,646 | 0.000005 | — | — | — | auction_timeout | tip +20%, resubmitted |
+| happy-path-single-tx | 3 | Failed | [`617h…LQg8`](https://solscan.io/tx/617hki66UzqD5DR2j9AzppPewgWN9WoKcJoTaUu4XudzXZmq5h1JDRB7LP4arzGMQNWBNW63nMj2m62T7divLQg8) | 429,518,731 | 0.000007 | — | — | — | exhausted | retry budget hit |
 
 \*Failed in lifecycle tracker because Jito JSON-RPC returned `Invalid` while Geyser had already confirmed the tx — AI correctly classified **landed** and aborted retry (no double-execute).
 
@@ -303,9 +306,45 @@ Mainnet audit log excerpt — happy paths, AI-recovered failures, and idempotenc
 
 ---
 
-## Metrics Graphics
+## Statistical Analysis
 
-Distribution charts for submit→processed latency, tip spend, and AI retry outcomes — **coming soon** in `assets/`.
+Charts plotted from `transactions.jsonl` mainnet runs. The headline: **execution is fast (about 270–400 ms to processed), finality is dominated by the confirmed→finalized stage (about 12–14 s cluster)** — tip spend barely moves that tail.
+
+### 1 · Latency components over time
+
+Three lifecycle stages per transaction. Confirmed→Finalized (red) dominates total time; 5-point rolling MA smooths the trend.
+
+![Latency components with moving average](assets/latency-ma.png)
+
+### 2 · Latency distributions
+
+Histograms + KDE per stage and total observed latency. Early stages are tight; finality clusters at ~12–14 s.
+
+![Latency distributions](assets/latency-distribution.png)
+
+### 3 · Latency boxplots by category
+
+Finality latency across outcome (Finalized vs Failed), attempt (0 vs retry), and scenario label. Retries and higher-tip paths show measurable shifts.
+
+![Latency boxplots by category](assets/latency-boxplot.png)
+
+### 4 · Tip vs finality latency
+
+Tip (lamports) vs Confirmed→Finalized, colored by percentile, sized by attempt — with linear regression and correlation. Useful for validating that modest tips don't buy faster finality.
+
+![Tip vs finality latency](assets/tip-finality-latency.png)
+
+### 5 · Failure analysis
+
+Left: failure reason breakdown (`AuctionTimeout` dominant in inconclusive-poll windows). Right: attempt × outcome heatmap — retries recover blockhash/tip failures; guardrail exhaustion stops the rest.
+
+![Failure analysis](assets/failure-analysis.png)
+
+### 6 · Finality latency trend
+
+Finality latency over transaction sequence — linear regression slope + rolling MA. Overall stable; no systematic drift across the test window.
+
+![Finality latency trend](assets/finality-latency-regression.png)
 
 ---
 
