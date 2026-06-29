@@ -52,11 +52,11 @@ Raw tip WebSocket ticks and per-slot hit counts are noisy. TURBINE uses **time-d
 
 This avoids overpaying on one outlier tip tick and avoids misclassifying a permanently busy pool as permanently "Hot."
 
-### 4. Deliberate scope — what we left out of the hot path
+### 4. Deliberate scope: what we left out of our stack deliberately.
 
 - **AI is never on the hot path.** Even an optimized LLM call (400–500 ms) is long enough to **miss a target slot** on Solana — where 200 ms of extra latency can cost inclusion. Failures route to a cold `mpsc` lane; the coordinator rebuilds and resubmits **after** the gate window, without stalling Geyser ingestion or submit.
 
-- **No deshred in production.** We tested deshred and confirmed pre-processed block data was available earlier than standard Geyser paths — but left it out of this build to **stay in scope**. TURBINE standardizes on Yellowstone/Geyser + Jito; deshred remains a future latency experiment, not a dependency.
+- **No deshred in production.** We tested deshred and confirmed pre-processed block data was available earlier than standard Geyser path but left it out of this build to **stay in scope**. TURBINE standardizes on Yellowstone/Geyser + Jito; deshred remains a future latency experiment, not a dependency.
 
 
 ## Quick Ultra-Low-Latency Proof
@@ -85,7 +85,7 @@ Note: This is just a sneak-peak, a larger table showing more reports happy, fail
 
 ### Stack Overview
 
-We built 9 rust crates for TURBINE as follows:
+We built 10 rust crates for TURBINE as follows:
 
 | Crate | Role |
 |-------|------|
@@ -109,7 +109,7 @@ flowchart LR
     HS -.->|lossy broadcast| UI[TUI + Web]
 ```
 
-The mermaid diagram above shows the most basic architectural diagram for TURBINE. At a high level, TURBINE is split into 6 different layers (as seen above) operateling together and concurently. We will briefly go over each of them below:
+The mermaid diagram above shows the most basic architectural diagram for TURBINE. At a high level, TURBINE is split into 6 different layers (as seen above) working together and concurently. We will briefly go over each of them below:
 
 Note: the explanations below is just a brief walkthrough of the layers. For complete teardown of the architecture, please visit the **[Google Slides →](https://docs.google.com/presentation/d/1WPVPPuMAiaqzYktap83oNc2iMOPpyrg0m-BdWr4AoX4/edit?usp=sharing)**
 
@@ -134,7 +134,7 @@ flowchart TB
 | Target txs | `account_include = watched_accounts` | Contention — only competing accounts |
 | Self txs | `account_include = wallet.pubkey` | Own-bundle landed detection |
 
-**Geyser consumption (provider-safe):** If our reader stops pulling, *you* feel it. We keep the stream moving:
+**Geyser consumption (provider-safe):** If our reader stops pulling, *SolInfra* feel it. We keep the stream moving:
 
 - **`account_include = watched_accounts`**, not program-wide firehoses; subscribe only to what we process.
 - **Dedicated reader** — decode + enqueue only; **`mpsc(8192)`** burst buffer.
