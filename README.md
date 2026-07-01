@@ -21,45 +21,32 @@ Turbine is an ultra-low latency smart transaction infrastructure for Solana that
 
 ---
 
-## Why TURBINE Stands Out?
+## TURBINE Wins. Why?
 
 ### 1. Tech stack: built for speed
 
-- **100% Rust** workspace with `lto = "fat"`, `codegen-units = 1`, and `panic = "abort"` for predictable, optimized binaries.
-- **Single Tokio multi-thread runtime** with explicit hot / warm / cold lanes — not separate processes pretending to be fast.
-- **Lock-free hot reads**: `ArcSwap` snapshots, sharded `DashMap`, and atomics — the submit path never takes a global mutex.
-- **Zero RPC on submit**: blockhash, leader schedule, and tip percentiles are warmed in background tasks; execution reads memory at gate + compile time.
-- **Provider-safe backpressure:** bounded `mpsc(8192)` — no unbounded RAM; account-filtered subs + dedicated Geyser reader + lightweight DPU keep the stream draining so the **provider never sees a stalled consumer** (slow internal consumers block on `send`, not at the cost of disconnecting your feed).
-- **Custom Jito Searcher gRPC client** generated from vendored `.proto` files (`tonic-build`) — no foreign SDK pin on the hot path.
+- **100% Rust** workspace: Predictable, optimized binaries | Single Tokio multi-thread runtim with explicit hot / warm / cold lanes.
+- **Lock-free hot reads**: `ArcSwap` snapshots, sharded `DashMap`, and atomics. The submit path never takes a global mutex, always kept ultra-fast.
+- **Provider-safe backpressure:** bounded `mpsc(8192)` — no unbounded RAM; account-filtered subs + dedicated Geyser reader + lightweight DPU keep the stream draining so the **provider never sees a stalled consumer**.
 
-### 2. Tip pricing: write-lock contention, not guesswork.
+### 2. Write-lock Contention-aware Tip Pricing.
 
-Every transaction on solana locks the accounts it writes to.
+Every transaction on Solana locks the accounts it writes to.
 
-Transactions competing for the same write-locks compete for inclusion, making write-lock contention a far better pricing signal than global network activity.
+Transactions competing for the same write-locks compete for inclusion, making write-lock contention a much stronger pricing signal than network-wide congestion.
 
-Instead of estimating network-wide congestion, TURBINE prices transactions based on write-lock competition by subscribing to Geyser transactions touching your **`watched_accounts`**, extracts each tx's **writable account set** (static keys + ALT-loaded writables), and maintains a per-account **contention score**. This directly matches how Solana scheduling and the Jito auction naturally operate.
+TURBINE continuously observes transactions touching your monitored accounts through Yellowstone/Geyser, reconstructs each transaction's writable account set, and maintains a real-time contention score for every account. Tip prices are then derived from tip_floor and actual write-lock competition, closely matching how Solana's scheduler and the Jito auction prioritize transactions.
 
-### 3. Exponential Moving Averages (EMA) signal smoothing where spikes lie.
+### 3. Exponential Moving Averages (EMA) To Smooth Market Noise.
 
-Raw tip WebSocket ticks and per-slot hit counts are noisy. TURBINE uses **time-decayed EMAs** everywhere it matters:
+Real-time tip updates and write-lock contention are inherently noisy. TURBINE uses time-decayed EMAs to smooth tip prices, contention scores, and market variance, allowing it to distinguish sustained congestion from short-lived spikes. The result is more stable bidding, better congestion classification, and consistently lower overpayment.
 
-| Signal | EMA role |
-|--------|----------|
-| **Write-lock hits / slot** | Fast + slow EMA per account → z-score vs baseline → congestion tier |
-| **Jito tip percentiles** | Independent EMA per p25–p99 → stable bid floors |
-| **Variance** | EMA of squared deviation → self-normalizing z-score per market |
+### 4. Deshredded Transactions. Earlier Signals, Faster Decisions (Optional).
 
-This avoids overpaying on one outlier tip tick and avoids misclassifying a permanently busy pool as permanently "Hot."
-
-### 4. Deliberate scope: what we left out of our stack deliberately.
-
-- **AI is never on the hot path.** Even an optimized LLM call (400–500 ms) is long enough to **miss a target slot** on Solana — where 200 ms of extra latency can cost inclusion. Failures route to a cold `mpsc` lane; the coordinator rebuilds and resubmits **after** the gate window, without stalling Geyser ingestion or submit.
-
-- **No deshred in production.** We tested deshred and confirmed pre-processed block data was available earlier than standard Geyser path but left it out of this build to **stay in scope**. TURBINE standardizes on Yellowstone/Geyser + Jito; deshred remains a future latency experiment, not a dependency.
+By subscribing to deshredded transactions, TURBINE observes network activity before the blocks are assembled. Earlier visibility means earlier contention detection, earlier pricing updates, and faster transaction decisions when every millisecond matters.
 
 
-## Quick Ultra-Low-Latency Proof
+## Quick Proof of Ultra-Low-Latency & Tip Intelligence.
 
 Five **mainnet** bundles from live `transactions.jsonl` runs (`happy-path-single-tx`, attempt 0, finalized), ranked by **smallest tip paid**.
 
@@ -412,8 +399,8 @@ turbine/
 ### 1 · Clone & build
 
 ```bash
-git clone <your-repo-url> turbine
-cd turbine/turbine
+git clone https://github.com/tsmboa0/TURBINE.git
+cd turbine
 cargo build --release
 cargo install --path crates/turbine-cli
 ```
@@ -442,6 +429,7 @@ export TURBINE_AI_API_KEY="sk-..."
 export TURBINE_GEYSER_X_TOKEN="your-token"   # if not in turbine.toml
 
 turbine start --config turbine.toml
+
 # TUI on interactive terminals; logs → $TMPDIR/turbine.log
 # Web studio → http://127.0.0.1:9000
 ```

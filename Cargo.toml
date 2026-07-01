@@ -35,7 +35,7 @@ bs58 = "0.5"
 
 # Execution / signing (Phase 4). The solana-sdk umbrella pins a mutually
 # compatible set of granular crates (aligned to solana-pubkey 4.x).
-jito-sdk-rust = { path = "../jito-rust-rpc" }
+jito-sdk-rust = "0.3.2"
 solana-sdk = "4.0.1"
 bincode = "1.3"
 base64 = "0.22"
@@ -51,9 +51,9 @@ prost-types = "0.14.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 
-# Reference SDKs (sibling repos to this workspace)
-yellowstone-grpc-client = { path = "../yellowstone-grpc/yellowstone-grpc-client" }
-yellowstone-grpc-proto = { path = "../yellowstone-grpc/yellowstone-grpc-proto" }
+# Geyser gRPC (crates.io — standalone clone needs no sibling yellowstone repo)
+yellowstone-grpc-client = "13.2.0"
+yellowstone-grpc-proto = { version = "12.5.0", features = ["tonic", "tonic-compression"] }
 
 # Serialization / config
 serde = { version = "1", features = ["derive"] }
