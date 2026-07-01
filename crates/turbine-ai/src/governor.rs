@@ -3,6 +3,11 @@
 //! The LLM/Tier-0 only *propose*; the governor enforces hard guardrails the model
 //! can never override: tip/slippage caps, max attempts, a per-minute spend cap,
 //! and the global kill switch. It clamps in-bounds proposals and aborts the rest.
+//!
+//! Compute-unit limits are **not** set here — on sanctioned resubmit the execution
+//! coordinator runs `simulateTransaction` (real measured CUs + headroom) before
+//! recompiling, falling back to the LLM's optional `cu_limit` or the static
+//! estimator if RPC simulation fails.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

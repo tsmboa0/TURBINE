@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Ordered so `max()` over a bundle's write-locked accounts picks the bottleneck.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Congestion {
+    Idle,
     Quiet,
     Moderate,
     Hot,
@@ -16,14 +17,15 @@ impl Congestion {
     /// Map a congestion level to the Jito tip percentile tier (plan §7.1).
     pub fn target_percentile(self) -> Percentile {
         match self {
-            Congestion::Quiet => Percentile::P25,
+            Congestion::Idle => Percentile::P25,
+            Congestion::Quiet => Percentile::P50,
             Congestion::Moderate => Percentile::P75,
             Congestion::Hot => Percentile::P95,
         }
     }
 }
 
-/// Jito landed-tip percentile buckets, matching the `tip_floor` / `tip_stream` schema.
+/// Jito landed-tip percentile buckets (p25–p99).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Percentile {
     P25,

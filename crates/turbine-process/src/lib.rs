@@ -24,7 +24,7 @@ use turbine_core::types::Congestion;
 use turbine_ingest::{geyser::FILTER_SELF, geyser::FILTER_TARGETS, GeyserMessage, IngestChannels};
 use turbine_state::HotState;
 
-use crate::extract::{signature_bytes, writable_accounts};
+use crate::extract::{signature_bytes, writable_accounts, writable_accounts_deshred};
 use crate::tips::TipState;
 
 /// How long without a Geyser update before we flag the stream unhealthy.
@@ -37,12 +37,19 @@ pub fn spawn(cfg: Arc<Config>, state: Arc<HotState>, channels: IngestChannels) -
 }
 
 async fn run(cfg: Arc<Config>, state: Arc<HotState>, channels: IngestChannels) {
-    let IngestChannels { mut geyser_rx, mut tips_rx, mut blockhash_rx, .. } = channels;
+    let IngestChannels {
+        mut geyser_rx,
+        mut deshred_rx,
+        mut tips_rx,
+        mut blockhash_rx,
+        feed,
+        ..
+    } = channels;
     let mut tip_state = TipState::new(cfg.strategy.tip_ema_half_life_ms);
 
-    // Counters + liveness for the periodic status line.
     let mut n_slots: u64 = 0;
     let mut n_target_tx: u64 = 0;
+    let mut n_deshred_tx: u64 = 0;
     let mut n_self_tx: u64 = 0;
     let mut last_flushed_slot: u64 = 0;
     let mut last_geyser: Option<Instant> = None;
@@ -119,6 +126,19 @@ async fn run(cfg: Arc<Config>, state: Arc<HotState>, channels: IngestChannels) {
                     GeyserMessage::BlockMeta(_) => {}
                 }
             }
+            maybe = async {
+                match deshred_rx.as_mut() {
+                    Some(rx) => rx.recv().await,
+                    None => std::future::pending().await,
+                }
+            }, if deshred_rx.is_some() => {
+                let Some(timed) = maybe else { break };
+                n_deshred_tx += 1;
+                if let Some(info) = timed.update.transaction.as_ref() {
+                    let writable = writable_accounts_deshred(info);
+                    state.contention.record_writable(&writable);
+                }
+            }
             maybe = tips_rx.recv() => {
                 if let Some(raw) = maybe {
                     tip_state.observe(raw, Instant::now());
@@ -142,7 +162,7 @@ async fn run(cfg: Arc<Config>, state: Arc<HotState>, channels: IngestChannels) {
                 }
 
                 let tips = state.tips();
-                let (mut hot, mut moderate, mut quiet) = (0usize, 0usize, 0usize);
+                let (mut hot, mut moderate, mut quiet, mut idle) = (0usize, 0usize, 0usize, 0usize);
                 let mut max_z = f64::MIN;
                 for pk in state.contention.watched().iter() {
                     if let Some(cs) = state.contention.snapshot(pk) {
@@ -151,9 +171,10 @@ async fn run(cfg: Arc<Config>, state: Arc<HotState>, channels: IngestChannels) {
                             Congestion::Hot => hot += 1,
                             Congestion::Moderate => moderate += 1,
                             Congestion::Quiet => quiet += 1,
+                            Congestion::Idle => idle += 1,
                         }
                     } else {
-                        quiet += 1;
+                        idle += 1;
                     }
                 }
                 let max_z = if max_z == f64::MIN { 0.0 } else { max_z };
@@ -167,10 +188,12 @@ async fn run(cfg: Arc<Config>, state: Arc<HotState>, channels: IngestChannels) {
                 info!(
                     slot = state.slot(),
                     healthy = state.geyser_healthy(),
+                    contention_feed = if feed.is_deshred_active() { "deshred" } else { "geyser" },
                     slots = n_slots,
                     target_tx = n_target_tx,
+                    deshred_tx = n_deshred_tx,
                     self_tx = n_self_tx,
-                    hot, moderate, quiet,
+                    hot, moderate, quiet, idle,
                     max_z = format!("{max_z:.2}"),
                     tip_p50 = tips.p50,
                     tip_p95 = tips.p95,

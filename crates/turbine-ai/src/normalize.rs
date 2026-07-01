@@ -82,7 +82,7 @@ mod tests {
                 blockhash_forced_stale: forced_stale,
                 tip_floor_lamports: floor,
                 tip_lamports: tip,
-                percentile: Percentile::P25,
+                percentile: Percentile::P50,
                 slippage_bps: None,
                 cu_limit: None,
                 sigs: vec![],

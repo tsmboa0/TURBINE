@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 
 use turbine_core::config::Config;
 use turbine_core::events::TelemetryEvent;
+use turbine_ingest::ContentionFeedControl;
 use turbine_state::HotState;
 
 /// Publish cadence. Fast enough for a lively dashboard, far slower than the hot
@@ -36,6 +37,7 @@ pub fn spawn(
     state: Arc<HotState>,
     bus: broadcast::Sender<TelemetryEvent>,
     jito_connected: bool,
+    feed: ContentionFeedControl,
 ) -> JoinHandle<()> {
     // Stable account order for the contention grid.
     let mut watched: Vec<Pubkey> = state.contention.watched().iter().copied().collect();
@@ -53,6 +55,7 @@ pub fn spawn(
             let _ = bus.send(TelemetryEvent::Health {
                 geyser: state.geyser_healthy(),
                 jito: jito_connected,
+                deshred_active: feed.is_deshred_active(),
             });
 
             // Slot (only when it advances). The interval Δ is measured at ingestion

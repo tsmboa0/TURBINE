@@ -32,6 +32,7 @@ ADJUSTMENTS: \
 - tip_too_low: set tip_bump_pct between 0.10 and 0.50 (max +50% per retry), \
 rebuild=true, fresh_blockhash=false. Resulting tip must be >= params.tip_floor_lamports. \
 - blockhash_expired: fresh_blockhash=true, rebuild=true, tip_bump_pct=null (do NOT bump tip). \
+- compute_budget_exceeded: rebuild=true; omit cu_limit (the engine simulates real CUs on rebuild). \
 - auction_timeout (only when tip is adequate and blockhash is fresh): may set \
 tip_bump_pct up to 0.30 OR fresh_blockhash=true based on raw_reason / Jito logs. \
 \

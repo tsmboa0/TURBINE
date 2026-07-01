@@ -46,6 +46,10 @@ enum Command {
         /// disabled when stdout is not a terminal (e.g. piped or backgrounded).
         #[arg(long)]
         no_tui: bool,
+        /// Use SubscribeDeshred for write-lock contention (pre-execution). Requires a
+        /// Triton extension Geyser endpoint; falls back to standard Geyser targets if unavailable.
+        #[arg(long)]
+        deshred: bool,
     },
 
     /// Send a mock trade scenario to the running daemon over IPC.
@@ -292,26 +296,28 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     // The dashboard runs only for `start` on an interactive terminal (and unless
     // `--no-tui` is set); everything else logs to stdout.
-    let tui_active =
-        matches!(cli.command, Command::Start { no_tui: false }) && std::io::stdout().is_terminal();
+    let tui_active = matches!(
+        cli.command,
+        Command::Start { no_tui: false, .. }
+    ) && std::io::stdout().is_terminal();
     init_tracing(tui_active)?;
 
     match cli.command {
-        Command::Start { .. } => {
+        Command::Start { deshred, .. } => {
             let cfg = Arc::new(Config::load(&cli.config)?);
             info!(config = %cli.config.display(), "configuration loaded and validated");
             info!(
                 geyser = %cfg.geyser.endpoint,
                 commitment = %cfg.geyser.commitment,
+                deshred,
                 programs = cfg.targets.programs.len(),
                 watched = cfg.targets.watched_accounts.len(),
                 "booting TURBINE — Phase 3 (ingestion + processing + hot state)"
             );
 
-            // Shared hot state (Phase 3), fed by ingestion (Phase 1) and the
-            // processing engine (Phase 2). Execution/TUI/web read it in later phases.
             let state = Arc::new(turbine_state::HotState::new(&cfg));
-            let (channels, _ingest) = turbine_ingest::spawn(cfg.clone()).await;
+            let (channels, _ingest, deshred_boot) = turbine_ingest::spawn(cfg.clone(), deshred).await;
+            let contention_feed = channels.feed.clone();
             state.set_tip_accounts(channels.tip_accounts_seed.clone());
 
             let task = turbine_process::spawn(cfg.clone(), state.clone(), channels);
@@ -425,6 +431,7 @@ async fn main() -> anyhow::Result<()> {
                 state.clone(),
                 bus_tx.clone(),
                 jito_connected,
+                contention_feed,
             ));
 
             // Web studio (Phase 9): axum on `server.web_bind`, reading the same
@@ -462,9 +469,17 @@ async fn main() -> anyhow::Result<()> {
             );
 
             if tui_active {
-                // Render loop owns the terminal on a blocking thread; `q`/Ctrl-C
-                // inside it notifies `shutdown`, and external shutdown sets
-                // `stopping` so the loop exits and restores the terminal.
+                // Last stderr lines before the TUI takes the terminal (logs still go to turbine.log).
+                if let Some(notice) = deshred_boot.terminal_notice() {
+                    use std::io::Write;
+                    let mut stderr = std::io::stderr();
+                    let _ = writeln!(stderr);
+                    for line in notice.lines() {
+                        let _ = writeln!(stderr, "{line}");
+                    }
+                    let _ = writeln!(stderr);
+                    let _ = stderr.flush();
+                }
                 let stopping = Arc::new(AtomicBool::new(false));
                 let studio = format!("http://{}", cfg.server.web_bind);
                 let tui = turbine_tui::spawn_dashboard(
@@ -473,6 +488,7 @@ async fn main() -> anyhow::Result<()> {
                     cfg.execution.dry_run,
                     shutdown.clone(),
                     stopping.clone(),
+                    deshred_boot,
                 );
 
                 tokio::select! {
@@ -487,6 +503,13 @@ async fn main() -> anyhow::Result<()> {
                 let _ = tui.await; // restores the terminal before we exit
                 info!("dashboard closed; TURBINE stopped");
             } else {
+                if let Some(notice) = deshred_boot.terminal_notice() {
+                    eprintln!();
+                    for line in notice.lines() {
+                        eprintln!("{line}");
+                    }
+                    eprintln!();
+                }
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => info!("Ctrl-C received; stopping"),
                     _ = shutdown.notified() => info!("stop requested over IPC; stopping"),

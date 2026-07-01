@@ -43,6 +43,8 @@ pub struct Dashboard {
     pub slot_interval_ms: Option<u64>,
     pub geyser: bool,
     pub jito: bool,
+    /// Contention feed is SubscribeDeshred (shown in TUI only when true).
+    pub deshred_active: bool,
     pub next_leader_slot: Option<u64>,
     pub slots_until: Option<i64>,
     /// Submission window open (a Jito leader is within the gate horizon).
@@ -86,6 +88,7 @@ impl Dashboard {
             slot_interval_ms: None,
             geyser: false,
             jito: false,
+            deshred_active: false,
             next_leader_slot: None,
             slots_until: None,
             leader_ready: false,
@@ -96,7 +99,7 @@ impl Dashboard {
             p99: 0,
             ema50: 0,
             last_tip: None,
-            bid_congestion: Congestion::Quiet,
+            bid_congestion: Congestion::Idle,
             bid_percentile: "P25".into(),
             bid_tip: 0,
             watching: false,
@@ -175,12 +178,13 @@ impl Dashboard {
                     None => self.accounts.push(row),
                 }
             }
-            TelemetryEvent::Health { geyser, jito } => {
+            TelemetryEvent::Health { geyser, jito, deshred_active } => {
                 if geyser != self.geyser || jito != self.jito {
                     self.pulse(Pulse::Health);
                 }
                 self.geyser = geyser;
                 self.jito = jito;
+                self.deshred_active = deshred_active;
             }
             TelemetryEvent::Stats { in_flight, tracked, ai_decisions, killed, dry_run } => {
                 if killed != self.killed {

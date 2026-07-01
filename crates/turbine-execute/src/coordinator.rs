@@ -177,13 +177,45 @@ impl RetryCoordinator {
 
         match decision.action {
             RetryAction::Resubmit(adj) => {
-                let overrides = RetryOverrides {
-                    tip_lamports: Some(
-                        bumped_tip(rs.tip_lamports, adj.tip_bump_pct).max(rs.tip_floor_lamports),
-                    ),
+                let tip_lamports = bumped_tip(rs.tip_lamports, adj.tip_bump_pct).max(rs.tip_floor_lamports);
+                let mut overrides = RetryOverrides {
+                    tip_lamports: Some(tip_lamports),
                     cu_limit: adj.cu_limit,
+                    simulated_cu_per_tx: None,
                     fresh_blockhash: adj.fresh_blockhash,
                 };
+
+                // Deterministic CU resolution (cold path): RPC simulation wins over
+                // the LLM's optional cu_limit guess when rebuilding.
+                if adj.rebuild {
+                    if let Some(bh) = self
+                        .state
+                        .blockhash()
+                        .as_ref()
+                        .as_ref()
+                        .map(|b| b.blockhash.as_str())
+                    {
+                        match self
+                            .engine
+                            .simulate_retry_cu_limits(&rs.intent, tip_lamports, bh)
+                            .await
+                        {
+                            Ok(limits) => {
+                                info!(?limits, "simulated CU limits for autonomous resubmit");
+                                overrides.simulated_cu_per_tx = Some(limits);
+                                overrides.cu_limit = None;
+                            }
+                            Err(e) => warn!(
+                                %e,
+                                ai_cu_limit = ?adj.cu_limit,
+                                "CU simulation failed; falling back to estimate or AI cu_limit"
+                            ),
+                        }
+                    } else {
+                        warn!("no warm blockhash for CU simulation; using estimate or AI cu_limit");
+                    }
+                }
+
                 let next_attempt = rs.attempt.saturating_add(1);
                 match self.engine.execute_retry(rs.intent.clone(), overrides, next_attempt).await {
                     Ok(rep) => info!(

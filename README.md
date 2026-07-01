@@ -23,13 +23,13 @@ Turbine is an ultra-low latency smart transaction infrastructure for Solana that
 
 ## TURBINE Wins. Why?
 
-### 1. Tech stack: built for speed
+### 1. ⚡️ Tech stack: built for speed
 
-- **100% Rust** workspace: Predictable, optimized binaries | Single Tokio multi-thread runtim with explicit hot / warm / cold lanes.
+- **100% Rust** workspace: Predictable, optimized binaries | Single Tokio multi-thread runtime with explicit hot / warm / cold lanes.
 - **Lock-free hot reads**: `ArcSwap` snapshots, sharded `DashMap`, and atomics. The submit path never takes a global mutex, always kept ultra-fast.
 - **Provider-safe backpressure:** bounded `mpsc(8192)` — no unbounded RAM; account-filtered subs + dedicated Geyser reader + lightweight DPU keep the stream draining so the **provider never sees a stalled consumer**.
 
-### 2. Write-lock Contention-aware Tip Pricing.
+### 2. 🔐 Write-lock Contention-aware Tip Pricing.
 
 Every transaction on Solana locks the accounts it writes to.
 
@@ -37,16 +37,34 @@ Transactions competing for the same write-locks compete for inclusion, making wr
 
 TURBINE continuously observes transactions touching your monitored accounts through Yellowstone/Geyser, reconstructs each transaction's writable account set, and maintains a real-time contention score for every account. Tip prices are then derived from tip_floor and actual write-lock competition, closely matching how Solana's scheduler and the Jito auction prioritize transactions.
 
-### 3. Exponential Moving Averages (EMA) To Smooth Market Noise.
+### 3. 📈 Exponential Moving Averages (EMA) To Smooth Market Noise.
 
 Real-time tip updates and write-lock contention are inherently noisy. TURBINE uses time-decayed EMAs to smooth tip prices, contention scores, and market variance, allowing it to distinguish sustained congestion from short-lived spikes. The result is more stable bidding, better congestion classification, and consistently lower overpayment.
 
-### 4. Deshredded Transactions. Earlier Signals, Faster Decisions (Optional).
+### 4. 📡 Deshredded Transactions. Earlier Signals, Faster Decisions (Optional).
 
 By subscribing to deshredded transactions, TURBINE observes network activity before the blocks are assembled. Earlier visibility means earlier contention detection, earlier pricing updates, and faster transaction decisions when every millisecond matters.
 
+## ⚠️ IMPORTANT FINDING!
 
-## Quick Proof of Ultra-Low-Latency & Tip Intelligence.
+### Compute Budget Is Critical on Jito
+
+Jito does not simply choose the bundle with the highest tip. When bundles compete for the same write-locks, it ranks them by **tip per compute unit (tip/CU)**, not absolute tip alone.
+
+**Example**
+
+| Searcher | Tip | CU limit | Tip/CU |
+|----------|-----|----------|--------|
+| A | 5,000,000 lamports | 200,000 | **25** lamports/CU |
+| B | 15,000 lamports | 450 | **33.3** lamports/CU |
+
+If both bundles contend on the same accounts, **Searcher B may win the auction** despite paying far less in total which means Jito maximizes tip *density*, not tip size.
+
+**Takeaway:** Always prepend a `SetComputeUnitLimit` instruction and request only the compute you need. Without it, Solana assigns the default **200,000 CU**, which collapses your effective tip/CU and makes the bundle less competitive. In our mainnet runs, bundles missing ComputeBudget only landed after **5M–10M lamport** tips; TURBINE prepends ComputeBudget as the **first instruction on every tx** and estimates tight CU limits on the hot path (RPC simulation on AI retry).
+
+---
+
+## Quick Proof of Ultra-Low-Latency Stack & Tip Intelligence.
 
 Five **mainnet** bundles from live `transactions.jsonl` runs (`happy-path-single-tx`, attempt 0, finalized), ranked by **smallest tip paid**.
 
@@ -76,7 +94,7 @@ We built 10 rust crates for TURBINE as follows:
 
 | Crate | Role |
 |-------|------|
-| `turbine-ingest` | Geyser gRPC, Jito tip WS/REST, warm RPC blockhash |
+| `turbine-ingest` | Geyser gRPC, optional SubscribeDeshred, Jito tips, warm RPC blockhash |
 | `turbine-process` | DPU — write-lock extract, EMA contention, tip smooth, lifecycle hooks |
 | `turbine-state` | `HotState` — atomics, `DashMap`, `ArcSwap` |
 | `turbine-execute` | Fee matrix, compiler, gate, Jito submit, schedule, coordinator |
@@ -88,6 +106,8 @@ We built 10 rust crates for TURBINE as follows:
 
 ### Architecture Overview
 
+End-to-end data flow: external feeds enter through **ingestion**, get folded by the **DPU** into **hot storage**, drive the **execution** pipeline to Jito, and route terminal failures to the **AI** cold path for retry. **TUI and web** subscribe lossily, they never block the submit path.
+
 ```mermaid
 flowchart LR
     ING[Ingestion] --> DPU[Processing] --> HS[Hot Storage] --> EXE[Execution] --> JITO[Jito BE]
@@ -96,52 +116,55 @@ flowchart LR
     HS -.->|lossy broadcast| UI[TUI + Web]
 ```
 
-The mermaid diagram above shows the most basic architectural diagram for TURBINE. At a high level, TURBINE is split into 6 different layers (as seen above) working together and concurently. We will briefly go over each of them below:
+The diagram above is the bird's-eye view. TURBINE splits into six layers that run concurrently on one Tokio runtime. Each layer below opens with a short summary, then detail.
 
-Note: the explanations below is just a brief walkthrough of the layers. For complete teardown of the architecture, please visit the **[Google Slides →](https://docs.google.com/presentation/d/1WPVPPuMAiaqzYktap83oNc2iMOPpyrg0m-BdWr4AoX4/edit?usp=sharing)**
+Note: the explanations below are a brief walkthrough. For a full teardown, see **[Google Slides →](https://docs.google.com/presentation/d/1WPVPPuMAiaqzYktap83oNc2iMOPpyrg0m-BdWr4AoX4/edit?usp=sharing)**
 
 ---
 
 ### 1 · Ingestion (`turbine-ingest`)
 
+**What it is:** TURBINE's I/O boundary. It connects to Yellowstone/Geyser, Jito, and Solana RPC, decodes updates, and pushes them into bounded async channels. No tip pricing, no bundle compile, no submit. Everything here is **subscribe → normalize → enqueue** with provider-safe backpressure.
+
 ```mermaid
 flowchart TB
-    GEY[Geyser gRPC] -->|mpsc 8192| DPU
+    GEY[Geyser Subscribe] -->|mpsc 8192| DPU
+    DSH[SubscribeDeshred optional] -->|mpsc 8192| DPU
     TIP[Jito tip WS/REST] -->|mpsc 256| DPU
     RPC[RPC blockhash] -->|watch| DPU
 ```
 
 **Sources:** Yellowstone/Geyser (TLS gRPC), Jito `tip_stream` WebSocket + `tip_floor` REST, Solana JSON-RPC (`getLatestBlockhash`, boot-only tip accounts).
 
-**Streams subscribed:**
+**Geyser `Subscribe` (always on):**
 
 | Stream | Filter | Purpose |
 |--------|--------|---------|
 | Slots | processed / confirmed / finalized | Chain head, EMA flush, lifecycle |
-| Target txs | `account_include = watched_accounts` | Contention — only competing accounts |
-| Self txs | `account_include = wallet.pubkey` | Own-bundle landed detection |
+| Target txs | `watched_accounts` | Contention *(default mode only)* |
+| Self txs | `wallet.pubkey` | Own-bundle landed detection |
 
-**Geyser consumption (provider-safe):** If our reader stops pulling, *SolInfra* feel it. We keep the stream moving:
+**Optional deshred (`turbine start --deshred`):** A second gRPC stream via **`SubscribeDeshred`** (Triton extension endpoints). Pre-execution transactions on `watched_accounts` feed **contention only** — slots, self-tx lifecycle, and gate health stay on standard Geyser. If the provider returns `UNIMPLEMENTED`, TURBINE logs a Triton hint and **automatically falls back** to Geyser targets; the daemon keeps running.
 
-- **`account_include = watched_accounts`**, not program-wide firehoses; subscribe only to what we process.
-- **Dedicated reader** — decode + enqueue only; **`mpsc(8192)`** burst buffer.
-- **Lightweight DPU** — inline parse, sharded `DashMap` writes; no RPC, disk, or LLM on the ingest path → queue drains before the reader blocks on `send`.
-- **HTTP/2 adaptive window + ping echo** — healthy gRPC flow on the wire.
+| Mode | Geyser `Subscribe` | `SubscribeDeshred` |
+|------|-------------------|---------------------|
+| `turbine start` | slots + targets + self | — |
+| `turbine start --deshred` | slots + self | targets (contention) |
 
-Tips → `mpsc(256)`. Blockhash → `watch` (latest only).
+**Provider-safe consumption:** Dedicated reader tasks, bounded `mpsc(8192)`, account-filtered subs (never program firehoses), HTTP/2 adaptive window + ping echo. Tips → `mpsc(256)`. Blockhash → `watch` (latest only).
 
 ---
 
-### 2 · Data Processing Unit (`turbine-process`)
+### 2 · Data Processing Unit (DPU) (`turbine-process`)
 
-Single **`tokio::select!`** consumer — one serial writer to hot state, no lock-ordering surprises.
+**What it is:** A single **`tokio::select!`** consumer. DPU is the only serial writer for ingestion-driven hot-state updates. Decodes Geyser/deshred transactions into write-lock sets, smooths Jito tips through EMAs, mirrors blockhash, advances lifecycle, and tracks Geyser liveness. Execution reads hot state concurrently but does not own contention writes except through submit outcomes.
 
 #### Transaction stream handling
 
-1. **Target filter** → `extract::writable_accounts` parses the Solana message header:
+1. **Target filter** (Geyser or deshred) → `extract::writable_accounts` / `writable_accounts_deshred` parses the Solana message header:
    - Writable signers: `keys[0 .. S−RS]`
    - Writable non-signers: `keys[S .. K−RU]`
-   - Plus `meta.loaded_writable_addresses` from ALTs
+   - Plus `meta.loaded_writable_addresses` (Geyser) or top-level `loaded_writable_addresses` (deshred)
 2. **Only watched accounts** increment per-slot window counters.
 3. On each **SlotProcessed**, `flush_slot` folds windows into EMAs for every watched account (including zero-hit decay).
 
@@ -181,6 +204,8 @@ Tip percentiles get **five independent EMAs** (p25–p99) with `tip_ema_half_lif
 
 ### 3 · Hot Storage (`turbine-state`)
 
+**What it is:** The lock-free in-memory façade. Atomics, `ArcSwap` snapshots, and sharded `DashMap` trackers. Stores slot head, smoothed tips, blockhash, leader view, per-account contention, and bundle lifecycle. **No business logic** lives here; the DPU and execution engine write, everyone else reads without global mutexes.
+
 | Data | Primitive | Why |
 |------|-----------|-----|
 | Slot, health, kill switch | `AtomicU64` / `AtomicBool` | Single-word hot reads |
@@ -192,6 +217,8 @@ Tip percentiles get **five independent EMAs** (p25–p99) with `tip_ema_half_lif
 ---
 
 ### 4 · Execution Engine (`turbine-execute`)
+
+**What it is:** The hot trading path. It reads hot state, price the tip, compile a v0 bundle, wait for the lookahead gate, submit to Jito. Blockhash, leader schedule, and tip percentiles are warmed in background tasks; the submit path reads memory only (No API or RPC calls to keep it ultra-fast). Also hosts epoch Jito schedule refresh and the AI retry coordinator hook.
 
 ```mermaid
 flowchart TB
@@ -222,6 +249,8 @@ Gate awaits **`watch` slot notifications** — never busy-spins.
 
 ### 5 · AI Layer (`turbine-ai`) — cold path
 
+**What it is:** Autonomous failure recovery — **not on the hot path**. Terminal bundle failures arrive on a separate `mpsc(256)` queue; an LLM classifies the cause, a governor enforces caps, and the coordinator rebuilds and resubmits. Hundreds-of-ms LLM latency never blocks Geyser ingestion or submit.
+
 ```mermaid
 flowchart LR
     FAIL[mpsc FailureEvent] --> COORD[RetryCoordinator]
@@ -241,6 +270,8 @@ flowchart LR
 ---
 
 ### 6 · TUI & Web UI — off the hot path
+
+**What it is:** Observability and control — lossy telemetry broadcast to the terminal dashboard and web studio, plus IPC for scenario triggers. These surfaces read hot state on a fixed tick or subscribe to a capped broadcast bus; slow consumers drop frames (`Lagged`) rather than applying backpressure upstream.
 
 | Surface | Data path | Blocks engine? |
 |---------|-----------|----------------|
@@ -430,11 +461,16 @@ export TURBINE_GEYSER_X_TOKEN="your-token"   # if not in turbine.toml
 
 turbine start --config turbine.toml
 
+# Optional: pre-execution contention via Triton SubscribeDeshred (auto-falls back if unsupported)
+turbine start --deshred --config turbine.toml
+
+#Note; you may need a higher tier plan on SolInfra or other provider you use to test the deshred.
+
 # TUI on interactive terminals; logs → $TMPDIR/turbine.log
 # Web studio → http://127.0.0.1:9000
 ```
 
-Use `--no-tui` for headless logging.
+Use `--no-tui` for headless logging. With `--deshred`, contention uses deshred when the provider supports it; slots, lifecycle, and gate health stay on the standard Geyser stream. Non-Triton endpoints log a warning and continue with default Geyser targets.
 
 ### 4 · Run scenarios (second terminal)
 

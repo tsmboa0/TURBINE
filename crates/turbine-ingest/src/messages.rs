@@ -1,14 +1,10 @@
 //! Types carried on the ingestion channels into the processing layer.
-//!
-//! We forward the Yellowstone proto structs by move (no copy) so the hot path
-//! stays allocation-free; deep decoding (write-lock extraction) happens in
-//! `turbine-process` (Phase 2). Each message is timestamped at receipt so the
-//! processing layer can compute ingest→decision latency.
 
 use std::time::Instant;
 
 use yellowstone_grpc_proto::geyser::{
-    SubscribeUpdateBlockMeta, SubscribeUpdateSlot, SubscribeUpdateTransaction,
+    SubscribeUpdateBlockMeta, SubscribeUpdateDeshredTransaction, SubscribeUpdateSlot,
+    SubscribeUpdateTransaction,
 };
 
 /// A single decoded Geyser update we care about, split by kind.
@@ -31,4 +27,11 @@ pub enum GeyserMessage {
 pub struct TimedGeyser {
     pub recv: Instant,
     pub msg: GeyserMessage,
+}
+
+/// Pre-execution deshred transaction (contention feed only).
+#[derive(Debug)]
+pub struct TimedDeshred {
+    pub recv: Instant,
+    pub update: SubscribeUpdateDeshredTransaction,
 }

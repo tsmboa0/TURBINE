@@ -30,6 +30,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use turbine_core::events::TelemetryEvent;
+use turbine_ingest::DeshredBootStatus;
 
 use app::Dashboard;
 
@@ -63,9 +64,10 @@ pub fn spawn_dashboard(
     dry_run: bool,
     shutdown: Arc<Notify>,
     stopping: Arc<AtomicBool>,
+    deshred_boot: DeshredBootStatus,
 ) -> JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        if let Err(e) = run(bus, studio_url, dry_run, &shutdown, &stopping) {
+        if let Err(e) = run(bus, studio_url, dry_run, &shutdown, &stopping, deshred_boot) {
             // The terminal is restored by `run` before returning, so this is safe.
             eprintln!("turbine-tui: {e}");
         }
@@ -91,10 +93,11 @@ fn run(
     dry_run: bool,
     shutdown: &Arc<Notify>,
     stopping: &Arc<AtomicBool>,
+    deshred_boot: DeshredBootStatus,
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
     let res = (|| {
-        if boot_sequence(&mut terminal, &studio_url, stopping)? {
+        if boot_sequence(&mut terminal, &studio_url, stopping, &deshred_boot)? {
             return Ok(()); // quit during boot
         }
         dashboard_loop(&mut terminal, &mut bus, studio_url, dry_run, shutdown, stopping)
@@ -104,12 +107,18 @@ fn run(
 }
 
 /// Returns `Ok(true)` if the operator quit during boot.
-fn boot_sequence(terminal: &mut Tui, studio_url: &str, stopping: &Arc<AtomicBool>) -> io::Result<bool> {
+fn boot_sequence(
+    terminal: &mut Tui,
+    studio_url: &str,
+    stopping: &Arc<AtomicBool>,
+    deshred_boot: &DeshredBootStatus,
+) -> io::Result<bool> {
+    let deshred_line = deshred_boot.boot_splash_line();
     for (i, stage) in STAGES.iter().enumerate() {
         if stopping.load(Ordering::Relaxed) {
             return Ok(true);
         }
-        terminal.draw(|f| ui::boot(f, i + 1, STAGES.len(), stage, studio_url))?;
+        terminal.draw(|f| ui::boot(f, i + 1, STAGES.len(), stage, studio_url, deshred_line.as_deref()))?;
         // The poll doubles as the per-stage delay and an early-quit check.
         if event::poll(Duration::from_millis(260))? {
             if let Event::Key(k) = event::read()? {
@@ -119,7 +128,16 @@ fn boot_sequence(terminal: &mut Tui, studio_url: &str, stopping: &Arc<AtomicBool
             }
         }
     }
-    terminal.draw(|f| ui::boot(f, STAGES.len(), STAGES.len(), "online", studio_url))?;
+    terminal.draw(|f| {
+        ui::boot(
+            f,
+            STAGES.len(),
+            STAGES.len(),
+            "online",
+            studio_url,
+            deshred_line.as_deref(),
+        )
+    })?;
     std::thread::sleep(Duration::from_millis(280));
     Ok(false)
 }
@@ -187,7 +205,11 @@ mod tests {
 
     fn sample_app() -> Dashboard {
         let mut app = Dashboard::new("http://127.0.0.1:9000".into(), true);
-        app.apply(TelemetryEvent::Health { geyser: true, jito: true });
+        app.apply(TelemetryEvent::Health {
+            geyser: true,
+            jito: true,
+            deshred_active: false,
+        });
         app.apply(TelemetryEvent::Slot {
             slot: 321_000_111,
             parent: None,
@@ -267,7 +289,7 @@ mod tests {
     #[test]
     fn boot_renders_with_studio_link() {
         let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
-        terminal.draw(|f| ui::boot(f, 3, 6, "processing engine", "http://127.0.0.1:9000")).unwrap();
+        terminal.draw(|f| ui::boot(f, 3, 6, "processing engine", "http://127.0.0.1:9000", None)).unwrap();
         let text = buffer_text(&terminal);
         assert!(text.contains("Studio"));
         assert!(text.contains("processing engine"));
@@ -291,7 +313,7 @@ mod tests {
         println!("+{}+", "-".repeat(w as usize));
 
         let mut term2 = Terminal::new(TestBackend::new(w, h)).unwrap();
-        term2.draw(|f| ui::boot(f, 4, 6, "execution + Jito", "http://127.0.0.1:9000")).unwrap();
+        term2.draw(|f| ui::boot(f, 4, 6, "execution + Jito", "http://127.0.0.1:9000", None)).unwrap();
         let buf = term2.backend().buffer();
         println!("\nBOOT SPLASH:\n+{}+", "-".repeat(w as usize));
         for row in buf.content().chunks(w as usize) {
@@ -307,7 +329,7 @@ mod tests {
         for (w, h) in [(20u16, 6u16), (40, 12), (80, 24), (200, 60)] {
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|f| ui::dashboard(f, &app)).unwrap();
-            terminal.draw(|f| ui::boot(f, 1, 6, "hot state", "http://127.0.0.1:9000")).unwrap();
+            terminal.draw(|f| ui::boot(f, 1, 6, "hot state", "http://127.0.0.1:9000", None)).unwrap();
         }
     }
 }

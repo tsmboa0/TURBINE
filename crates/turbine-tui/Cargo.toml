@@ -9,6 +9,7 @@ description = "TURBINE terminal dashboard: boot sequence + short, dense, glancea
 turbine-core = { workspace = true }
 turbine-state = { workspace = true }
 turbine-execute = { workspace = true }
+turbine-ingest = { workspace = true }
 solana-pubkey = { workspace = true }
 tokio = { workspace = true }
 ratatui = { workspace = true }

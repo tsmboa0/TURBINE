@@ -94,6 +94,7 @@
     border-top:1px dashed var(--grid); padding-top:12px; }
   .bidline .big { font-size:22px; font-weight:800; color:var(--neon); text-shadow:0 0 12px rgba(56,225,255,.4); }
   .tag { padding:2px 9px; border-radius:999px; font-weight:800; font-size:11px; letter-spacing:.08em; }
+  .tag.idle { color:var(--dim); border:1px solid var(--grid); background:rgba(104,128,142,.08); }
   .tag.quiet{ color:var(--green); border:1px solid rgba(51,246,160,.4); background:rgba(51,246,160,.08); }
   .tag.mod  { color:var(--yellow); border:1px solid rgba(255,210,63,.4); background:rgba(255,210,63,.08); }
   .tag.hot  { color:var(--red); border:1px solid rgba(255,93,119,.4); background:rgba(255,93,119,.08); }
@@ -154,6 +155,7 @@
     <span class="pill"><span class="k">SLOT</span> <b id="slot">—</b></span>
     <span class="pill"><span class="k">LEADER</span> <b id="leader">—</b></span>
     <span class="pill"><span class="dot" id="d-geyser"></span> GEYSER</span>
+    <span class="pill" id="pill-deshred" style="display:none"><span class="dot ok" id="d-deshred"></span> DESHRED</span>
     <span class="pill"><span class="dot" id="d-jito"></span> JITO</span>
     <span class="pill"><span class="dot" id="d-conn"></span> <b id="conn">connecting…</b></span>
   </div>
@@ -334,6 +336,7 @@
         $("d-geyser").className = "dot " + (d.geyser ? "ok" : "bad");
         $("d-jito").className   = "dot " + (d.jito ? "ok" : "warn");
         active("n-geyser", d.geyser);
+        $("pill-deshred").style.display = d.deshred_active ? "inline-flex" : "none";
         break;
       case "tip_snapshot":
         document.querySelectorAll('[data-p]').forEach(el => {
@@ -372,10 +375,11 @@
   function setBidTag(cong, watching){
     const t = $("bid-tag");
     if (!watching){ t.className = "tag none"; t.textContent = "◦ NO SIGNAL"; return; }
-    const c = (cong||"quiet").toLowerCase();
+    const c = (cong||"idle").toLowerCase();
     if (c==="hot"){ t.className="tag hot"; t.textContent="● HOT"; }
     else if (c==="moderate"){ t.className="tag mod"; t.textContent="● MODERATE"; }
-    else { t.className="tag quiet"; t.textContent="● QUIET"; }
+    else if (c==="quiet"){ t.className="tag quiet"; t.textContent="● QUIET"; }
+    else { t.className="tag idle"; t.textContent="● IDLE"; }
   }
 
   function highlightTier(pct){
@@ -388,15 +392,15 @@
   function renderContention(){
     const box = $("cont-body");
     if (contention.size === 0){ box.innerHTML = '<div class="empty">No watched accounts configured.</div>'; return; }
-    const color = (lvl) => lvl==="hot" ? "var(--red)" : lvl==="moderate" ? "var(--yellow)" : "var(--green)";
+    const color = (lvl) => lvl==="hot" ? "var(--red)" : lvl==="moderate" ? "var(--yellow)" : lvl==="quiet" ? "var(--green)" : "var(--dim)";
     let html = "";
     for (const [acct, v] of contention){
-      const lvl = (v.level||"quiet").toLowerCase();
-      const pct = Math.max(4, Math.min(100, (Math.abs(v.z)/4)*100));
+      const lvl = (v.level||"idle").toLowerCase();
+      const pct = lvl === "idle" ? 4 : Math.max(4, Math.min(100, (Math.abs(v.z)/4)*100));
       html += `<div class="cont-row"><span class="nm">${acct}</span>
         <span class="meter"><i style="width:${pct}%;background:${color(lvl)}"></i></span>
         <span class="muted">z=${(v.z>=0?"+":"")+ (Math.round(v.z*10)/10)}</span>
-        <span class="tag ${lvl==='hot'?'hot':lvl==='moderate'?'mod':'quiet'}">${lvl.toUpperCase()}</span></div>`;
+        <span class="tag ${lvl==='hot'?'hot':lvl==='moderate'?'mod':lvl==='quiet'?'quiet':'idle'}">${lvl.toUpperCase()}</span></div>`;
     }
     box.innerHTML = html;
   }

@@ -28,6 +28,13 @@ const MIN_TX_CU: u32 = 600;
 /// Headroom fraction (1/8 ≈ 12.5%) so small meter drift does not fail execution.
 const HEADROOM_DIVISOR: u32 = 8;
 
+/// Apply the same headroom policy to an RPC `unitsConsumed` sample.
+pub fn limit_from_consumed(consumed: u64) -> u32 {
+    let base = u32::try_from(consumed).unwrap_or(u32::MAX);
+    let with_headroom = base.saturating_add(base / HEADROOM_DIVISOR);
+    with_headroom.max(MIN_TX_CU)
+}
+
 /// Estimate the `SetComputeUnitLimit` for a transaction whose body is `body_ixs`
 /// (ComputeBudget ix **not** included — the compiler prepends it).
 pub fn estimate_transaction_compute_units(body_ixs: &[Instruction]) -> u32 {
@@ -60,6 +67,12 @@ mod tests {
 
     fn payer() -> solana_pubkey::Pubkey {
         solana_pubkey::Pubkey::new_from_array([9u8; 32])
+    }
+
+    #[test]
+    fn limit_from_consumed_adds_headroom() {
+        assert_eq!(limit_from_consumed(800), 900); // +12.5%
+        assert_eq!(limit_from_consumed(0), MIN_TX_CU);
     }
 
     #[test]

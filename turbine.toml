@@ -43,32 +43,30 @@ TURBINE_WALLET_PUBKEY = ""
 # filtered by `watched_accounts` (below), NOT by program. Subscribing to a whole
 # hot program (e.g. Pump AMM) floods the stream with txs we discard and triggers
 # server-side backpressure; we only need the txs that touch our watched accounts.
-
 programs = [
   "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
 ]
-
 # Specific WRITABLE state accounts your strategy contends on (pool/vault/curve state).
 # The Geyser tx stream is filtered to exactly these accounts; contention is measured
 # against them (a tx counts only when it WRITE-locks one of these).
 
+#Note: We tested the contention by watching a pump.fun AMM pool (WORLD-WSOL)
+
 watched_accounts = [
-  "ABd4DYTJx2PogBpG5pbK7Dkh5VkJLMaCLhY6aVHpa1gk"
+  "EwRxs61YB2sWiANgQCbG9vgeRKWDZ3FxXWtYZ2kFVbM8"
 ]
 
 [strategy]
 ema_half_life_ms = 2000
 ema_slow_half_life_ms = 30000
 tip_ema_half_life_ms = 5000
-quiet_z = 0.5
-hot_z = 2.0
+quiet_z = 0.3
+hot_z = 1.0
 gate_min = 1
 gate_max = 1
 tip_bump_pct = 0.10              # flat bump on top of the selected percentile floor
-
 # Contention-scaled bump: extra fractional tip per z-score unit ABOVE hot_z, so we
 # bid harder exactly when the bottleneck account spikes. Capped to keep it bounded.
-
 contention_bump_slope = 0.10     # +10% per z above hot_z (0 disables, flat bump only)
 max_contention_bump_pct = 0.50   # at most +50% from contention, before the hard clamp
 min_tip_lamports = 1000

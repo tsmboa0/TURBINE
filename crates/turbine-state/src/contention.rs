@@ -95,11 +95,11 @@ impl ContentionTracker {
         self.cells.get(pk).map(|c| c.snapshot())
     }
 
-    /// Congestion tier for a single account (Quiet if never observed).
+    /// Congestion tier for a single account (Idle if never observed).
     pub fn congestion(&self, pk: &Pubkey) -> Congestion {
         self.snapshot(pk)
             .map(|s| s.congestion(self.quiet_z, self.hot_z))
-            .unwrap_or(Congestion::Quiet)
+            .unwrap_or(Congestion::Idle)
     }
 
     /// Congestion across a bundle's write-locked accounts = the **max** (the
@@ -109,7 +109,7 @@ impl ContentionTracker {
             .iter()
             .map(|a| self.congestion(a))
             .max()
-            .unwrap_or(Congestion::Quiet)
+            .unwrap_or(Congestion::Idle)
     }
 
     /// Self-normalized z-score for an account (0.0 if never observed).
@@ -144,6 +144,13 @@ mod tests {
 
         assert!(tracker.snapshot(&pk(1)).is_some());
         assert!(tracker.snapshot(&pk(3)).is_none());
+    }
+
+    #[test]
+    fn never_observed_is_idle() {
+        let watched: HashSet<Pubkey> = [pk(1)].into_iter().collect();
+        let tracker = ContentionTracker::new(watched, 400, 30_000, 0.5, 2.0);
+        assert_eq!(tracker.congestion(&pk(1)), Congestion::Idle);
     }
 
     #[test]

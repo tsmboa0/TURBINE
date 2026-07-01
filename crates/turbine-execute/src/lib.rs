@@ -16,6 +16,7 @@ pub mod outcomes;
 pub mod schedule;
 pub mod scenarios;
 pub mod searcher;
+pub mod simulate;
 pub mod submit;
 pub mod tx;
 
@@ -38,7 +39,7 @@ use turbine_core::types::{Congestion, FailureClass, Percentile};
 use turbine_state::HotState;
 
 pub use compiler::{
-    compile_bundle, compile_single_tx_bundle, CompiledBundle, MAX_BUNDLE_TXS, MAX_TRADE_TXS,
+    compile_bundle, compile_single_tx_bundle, CompiledBundle, CuLimitPlan, MAX_BUNDLE_TXS, MAX_TRADE_TXS,
 };
 pub use compute::estimate_transaction_compute_units;
 pub use coordinator::{
@@ -98,8 +99,11 @@ impl TradeIntent {
 pub struct RetryOverrides {
     /// Absolute tip to use (already bumped + clamped by the governor).
     pub tip_lamports: Option<u64>,
-    /// Compute-unit limit to set via a ComputeBudget instruction.
+    /// Compute-unit limit to set via a ComputeBudget instruction (AI guess; used
+    /// when RPC simulation fails on retry).
     pub cu_limit: Option<u32>,
+    /// Per-tx limits from `simulateTransaction` on retry (takes precedence over `cu_limit`).
+    pub simulated_cu_per_tx: Option<Vec<u32>>,
     /// Informational: the warm cache always provides the freshest blockhash, so a
     /// rebuild re-signs against it automatically; this flags intent for the audit.
     pub fresh_blockhash: bool,
@@ -209,6 +213,25 @@ impl ExecutionEngine {
         self.execute_inner(intent, attempt, Some(overrides)).await
     }
 
+    /// RPC `simulateTransaction` for each tx body — used before autonomous resubmit.
+    pub async fn simulate_retry_cu_limits(
+        &self,
+        intent: &TradeIntent,
+        tip_lamports: u64,
+        blockhash: &str,
+    ) -> Result<Vec<u32>> {
+        simulate::bundle_cu_limits(
+            &self.cfg.rpc.http_url,
+            &self.payer,
+            intent,
+            tip_lamports,
+            &self.state.tip_accounts(),
+            blockhash,
+            self.cfg.strategy.max_trades_per_bundle,
+        )
+        .await
+    }
+
     async fn execute_inner(
         &self,
         intent: TradeIntent,
@@ -249,8 +272,12 @@ impl ExecutionEngine {
 
         // 2) Compile + sign (ComputeBudget first on every tx; tip tx last). Retries
         //    always use the warm blockhash; attempt 0 may force a stale hash for live
-        //    fail-path testing. AI retry may override the CU limit.
-        let cu_limit_override = overrides.as_ref().and_then(|o| o.cu_limit);
+        //    fail-path testing. AI retry may override CU via simulation or LLM guess.
+        let cu_limits = if let Some(sim) = overrides.as_ref().and_then(|o| o.simulated_cu_per_tx.clone()) {
+            CuLimitPlan::per_tx(sim)
+        } else {
+            CuLimitPlan::uniform(overrides.as_ref().and_then(|o| o.cu_limit))
+        };
         let groups = intent.trade_ix_groups.clone();
 
         let t0 = Instant::now();
@@ -273,7 +300,7 @@ impl ExecutionEngine {
                 tip_lamports,
                 &tip_accounts,
                 blockhash_str,
-                cu_limit_override,
+                cu_limits,
             )?
         } else {
             compile_bundle(
@@ -283,7 +310,7 @@ impl ExecutionEngine {
                 &tip_accounts,
                 blockhash_str,
                 self.cfg.strategy.max_trades_per_bundle,
-                cu_limit_override,
+                cu_limits,
             )?
         };
         let bundle_b64_bytes = bundle.base64.iter().map(String::len).sum();

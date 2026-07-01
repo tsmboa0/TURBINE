@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn full_happy_path_records_deltas() {
         let lt = LifecycleTracker::new();
-        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P25, SubmitContext::default());
+        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P50, SubmitContext::default());
         assert_eq!(lt.get(id).unwrap().state, LifecycleState::Submitted);
 
         // small sleeps so deltas are measurable and ordered
@@ -475,14 +475,14 @@ mod tests {
     #[test]
     fn unknown_sig_is_ignored() {
         let lt = LifecycleTracker::new();
-        lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P25, SubmitContext::default());
+        lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P50, SubmitContext::default());
         assert!(lt.on_self_tx(&sig(99), 5).is_none());
     }
 
     #[test]
     fn failure_marks_terminal() {
         let lt = LifecycleTracker::new();
-        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P25, SubmitContext::default());
+        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P50, SubmitContext::default());
         lt.on_failure(id, FailureClass::BlockhashExpired);
         assert_eq!(lt.get(id).unwrap().state, LifecycleState::Failed);
         assert_eq!(lt.in_flight(), 0);
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn self_tx_recovers_from_false_failure() {
         let lt = LifecycleTracker::new();
-        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P25, SubmitContext::default());
+        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P50, SubmitContext::default());
         lt.on_failure(id, FailureClass::BundleDropped);
         assert_eq!(lt.get(id).unwrap().state, LifecycleState::Failed);
 
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn early_stream_result_buffered_until_bundle_id_set() {
         let lt = LifecycleTracker::new();
-        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P25, SubmitContext::default());
+        let id = lt.on_submit(vec![sig(1)], 0, 1_000, Percentile::P50, SubmitContext::default());
         assert!(lt
             .on_bundle_result("uuid-1", BundleOutcome::Rejected(FailureClass::TipTooLow))
             .is_none());

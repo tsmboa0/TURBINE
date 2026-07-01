@@ -84,12 +84,12 @@ watched_accounts = ["So11111111111111111111111111111111111111112"]
 "#;
 
     #[test]
-    fn quiet_selects_p25_and_clamps_floor() {
+    fn idle_selects_p25_and_clamps_floor() {
         let cfg = Config::from_toml_str(SAMPLE).unwrap();
         let state = HotState::new(&cfg);
-        // No tips data → base 0 → clamps up to the 1000-lamport floor.
+        // No watched contention signal → Idle → P25; no tips → clamps to floor.
         let dec = select_tip(&state, &[], &cfg.strategy);
-        assert_eq!(dec.congestion, Congestion::Quiet);
+        assert_eq!(dec.congestion, Congestion::Idle);
         assert_eq!(dec.percentile, Percentile::P25);
         assert_eq!(dec.tip_lamports, cfg.strategy.min_tip_lamports);
     }
@@ -99,7 +99,7 @@ watched_accounts = ["So11111111111111111111111111111111111111112"]
         let cfg = Config::from_toml_str(SAMPLE).unwrap();
         let state = HotState::new(&cfg);
         state.set_tips(TipSnapshot { p25: 1_000, p50: 2_000, p75: 5_000, p95: 50_000, p99: 200_000 });
-        // Quiet → P25 = 1000, +10% bump = 1100.
+        // Idle → P25 = 1000, +10% bump = 1100.
         let dec = select_tip(&state, &[], &cfg.strategy);
         assert_eq!(dec.tip_lamports, 1_100);
     }

@@ -103,7 +103,13 @@ pub enum TelemetryEvent {
     },
 
     /// Subsystem health flags (TUI status indicators).
-    Health { geyser: bool, jito: bool },
+    Health {
+        geyser: bool,
+        jito: bool,
+        /// True when contention is fed by SubscribeDeshred (omitted from JSON when false).
+        #[serde(default)]
+        deshred_active: bool,
+    },
 
     /// Aggregate live counters for the TUI status strip (the web UI renders the
     /// full per-bundle history; this is just the at-a-glance roll-up).

@@ -319,7 +319,7 @@ spend_cap_lamports_per_min = 100000000
             vec![sig],
             0,
             1_000,
-            turbine_core::types::Percentile::P25,
+            turbine_core::types::Percentile::P50,
             turbine_state::SubmitContext::default(),
         );
         state.lifecycle.on_self_tx(&sig, 123);

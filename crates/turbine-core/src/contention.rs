@@ -19,6 +19,18 @@ use serde::{Deserialize, Serialize};
 use crate::ema::DecayEma;
 use crate::types::Congestion;
 
+/// z-score magnitude below which contention is treated as exactly zero (Idle).
+pub const IDLE_Z_EPSILON: f64 = 1e-9;
+
+/// Fast/slow EMA must both be below this for [`Congestion::Idle`] (true zero activity).
+pub const IDLE_ACTIVITY_EPSILON: f64 = 1e-9;
+
+/// True when the account has no measurable deviation from baseline (strict idle).
+#[inline]
+pub fn is_idle_z(z: f64) -> bool {
+    z.abs() < IDLE_Z_EPSILON
+}
+
 /// Mutable per-account contention state. Updated once per micro-window (slot).
 #[derive(Debug, Clone)]
 pub struct ContentionCell {
@@ -100,8 +112,16 @@ pub struct ContentionSnapshot {
 
 impl ContentionSnapshot {
     /// Classify into a [`Congestion`] tier using the configured z thresholds.
+    ///
+    /// [`Congestion::Idle`] applies when `z` is strictly zero **and** the fast/slow
+    /// EMAs show no measurable write-lock activity on this account.
     pub fn congestion(&self, quiet_z: f64, hot_z: f64) -> Congestion {
-        if self.z >= hot_z {
+        if is_idle_z(self.z)
+            && self.fast < IDLE_ACTIVITY_EPSILON
+            && self.slow < IDLE_ACTIVITY_EPSILON
+        {
+            Congestion::Idle
+        } else if self.z >= hot_z {
             Congestion::Hot
         } else if self.z <= quiet_z {
             Congestion::Quiet
@@ -115,6 +135,12 @@ impl ContentionSnapshot {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn zero_z_is_idle_not_quiet() {
+        let snap = ContentionSnapshot { fast: 0.0, slow: 0.0, z: 0.0, total_hits: 0 };
+        assert_eq!(snap.congestion(0.5, 2.0), Congestion::Idle);
+    }
 
     #[test]
     fn quiet_until_burst_then_hot() {

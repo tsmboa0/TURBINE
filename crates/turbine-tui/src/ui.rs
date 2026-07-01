@@ -215,7 +215,7 @@ fn system_monitor(f: &mut Frame, area: Rect, app: &Dashboard) {
         _ => Line::from(vec![Span::styled(" LEADER   ", theme::label()), Span::styled("—", theme::label())]),
     };
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![
             Span::styled(" SLOT     ", theme::label()),
             Span::styled(app.slot.to_string(), slot_style),
@@ -230,6 +230,16 @@ fn system_monitor(f: &mut Frame, area: Rect, app: &Dashboard) {
             health_dot(app.jito),
         ]),
     ];
+    if app.deshred_active {
+        lines.push(Line::from(vec![
+            Span::styled(" DESHRED ", theme::label()),
+            Span::styled(
+                "● ACTIVE",
+                Style::default().fg(theme::NEON).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  pre-exec contention", Style::default().fg(theme::DIM)),
+        ]));
+    }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -273,6 +283,7 @@ fn auction_board(f: &mut Frame, area: Rect, app: &Dashboard) {
     row2.extend(p("P99", app.p99, theme::RED));
 
     let (cong_txt, cong_color) = match app.bid_congestion {
+        Congestion::Idle => ("IDLE", theme::DIM),
         Congestion::Quiet => ("QUIET", theme::GREEN),
         Congestion::Moderate => ("MOD", theme::YELLOW),
         Congestion::Hot => ("HOT", theme::RED),
@@ -314,6 +325,7 @@ fn contention(f: &mut Frame, area: Rect, app: &Dashboard) {
     let mut lines = Vec::new();
     for r in app.accounts.iter().take(rows) {
         let (color, fill, tag) = match r.level {
+            Congestion::Idle => (theme::DIM, 0usize, "IDLE"),
             Congestion::Quiet => (theme::GREEN, 1usize, "QUIET"),
             Congestion::Moderate => (theme::YELLOW, 3, "MOD"),
             Congestion::Hot => (theme::RED, 5, "HOT"),
@@ -420,21 +432,31 @@ fn footer(f: &mut Frame, area: Rect, app: &Dashboard) {
 }
 
 /// Boot splash: emblem + gradient wordmark + progressive loading bar + stage.
-pub fn boot(f: &mut Frame, done: usize, total: usize, stage: &str, studio_url: &str) {
+pub fn boot(
+    f: &mut Frame,
+    done: usize,
+    total: usize,
+    stage: &str,
+    studio_url: &str,
+    deshred_line: Option<&str>,
+) {
     let area = f.area();
     canvas(f, area);
-    let block = centered(area, 64, 12);
+    let block = centered(area, 64, if deshred_line.is_some() { 13 } else { 12 });
 
-    let rows = Layout::vertical([
+    let mut constraints = vec![
         Constraint::Length(6), // wordmark
         Constraint::Length(1), // tagline
         Constraint::Length(1),
         Constraint::Length(1), // gauge
         Constraint::Length(1), // stage
         Constraint::Length(1),
-        Constraint::Length(1), // studio
-    ])
-    .split(block);
+    ];
+    if deshred_line.is_some() {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Length(1)); // studio
+    let rows = Layout::vertical(constraints).split(block);
 
     f.render_widget(Paragraph::new(wordmark_lines()), rows[0]);
     f.render_widget(
@@ -459,12 +481,32 @@ pub fn boot(f: &mut Frame, done: usize, total: usize, stage: &str, studio_url: &
         .alignment(Alignment::Center),
         rows[4],
     );
+    let studio_row = if deshred_line.is_some() {
+        if let Some(line) = deshred_line {
+            let color = if line.contains("FALLBACK") {
+                theme::YELLOW
+            } else {
+                theme::NEON
+            };
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    line,
+                    Style::default().fg(color).add_modifier(Modifier::BOLD),
+                )))
+                .alignment(Alignment::Center),
+                rows[6],
+            );
+        }
+        rows[7]
+    } else {
+        rows[6]
+    };
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("Studio ", theme::label()),
             Span::styled(studio_url, Style::default().fg(theme::NEON).add_modifier(Modifier::UNDERLINED)),
         ]))
         .alignment(Alignment::Center),
-        rows[6],
+        studio_row,
     );
 }

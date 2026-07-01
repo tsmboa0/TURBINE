@@ -9,7 +9,7 @@ use turbine_core::ema::DecayEma;
 use turbine_core::tips::TipSnapshot;
 use turbine_ingest::TipLamports;
 
-/// Smoothing state for the five tip percentiles.
+/// Smoothing state for the five tip percentiles (p25–p99).
 pub struct TipState {
     p25: DecayEma,
     p50: DecayEma,

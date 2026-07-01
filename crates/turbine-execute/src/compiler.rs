@@ -23,15 +23,42 @@ pub const MAX_BUNDLE_TXS: usize = 5;
 /// At most three trade transactions per bundle; the tip tx is always last.
 pub const MAX_TRADE_TXS: usize = 3;
 
-/// Resolve CU limit for one transaction: AI override, else tight estimate.
+/// Resolve CU limit for one transaction: explicit override, else tight estimate.
 #[inline]
 fn resolve_compute_unit_limit(body_ixs: &[Instruction], override_limit: Option<u32>) -> u32 {
     override_limit.unwrap_or_else(|| estimate_transaction_compute_units(body_ixs))
 }
 
+/// Per-transaction CU limits for bundle compile (uniform fallback or per-tx vector).
+#[derive(Debug, Clone, Default)]
+pub struct CuLimitPlan {
+    /// Applied to every tx when `per_tx` is absent or short.
+    pub uniform: Option<u32>,
+    /// One limit per compiled tx (trade txs in order, then tip).
+    pub per_tx: Option<Vec<u32>>,
+}
+
+impl CuLimitPlan {
+    pub fn uniform(v: Option<u32>) -> Self {
+        Self { uniform: v, per_tx: None }
+    }
+
+    pub fn per_tx(v: Vec<u32>) -> Self {
+        Self { uniform: None, per_tx: Some(v) }
+    }
+
+    fn for_tx(&self, tx_index: usize, body_ixs: &[Instruction]) -> u32 {
+        if let Some(ref limits) = self.per_tx {
+            if let Some(&lim) = limits.get(tx_index) {
+                return lim;
+            }
+        }
+        resolve_compute_unit_limit(body_ixs, self.uniform)
+    }
+}
+
 /// Prepend `SetComputeUnitLimit` as the first instruction in a transaction.
-fn with_compute_budget_first(body_ixs: Vec<Instruction>, override_limit: Option<u32>) -> Vec<Instruction> {
-    let cu_limit = resolve_compute_unit_limit(&body_ixs, override_limit);
+fn with_compute_budget_first(body_ixs: Vec<Instruction>, cu_limit: u32) -> Vec<Instruction> {
     let mut ixs = body_ixs;
     ixs.insert(0, set_compute_unit_limit(cu_limit));
     ixs
@@ -66,7 +93,7 @@ pub fn compile_bundle(
     tip_accounts: &[Pubkey],
     blockhash: &str,
     max_trades: usize,
-    cu_limit_override: Option<u32>,
+    cu_limits: CuLimitPlan,
 ) -> Result<CompiledBundle> {
     if tip_accounts.is_empty() {
         return Err(TurbineError::Execute("no Jito tip accounts available".into()));
@@ -82,13 +109,16 @@ pub fn compile_bundle(
     let payer_pk = payer.pubkey();
     let mut txs: Vec<VersionedTransaction> = Vec::new();
 
+    let mut tx_index = 0usize;
     // Trade transactions (cap at 3 trades, leave room for the tip tx).
     let cap = max_trades.min(MAX_TRADE_TXS).min(MAX_BUNDLE_TXS - 1);
     for group in trade_ix_groups.into_iter().take(cap) {
         if group.is_empty() {
             continue;
         }
-        let group = with_compute_budget_first(group, cu_limit_override);
+        let cu = cu_limits.for_tx(tx_index, &group);
+        let group = with_compute_budget_first(group, cu);
+        tx_index += 1;
         let msg = v0::Message::try_compile(&payer_pk, &group, &[], bh)
             .map_err(|e| TurbineError::Execute(format!("compile trade message: {e}")))?;
         let tx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &[payer])
@@ -98,7 +128,8 @@ pub fn compile_bundle(
 
     // Tip transaction (always last): ComputeBudget first, transfer last.
     let tip_ix = system_transfer(&payer_pk, &tip_account, tip_lamports);
-    let tip_ixs = with_compute_budget_first(vec![tip_ix], cu_limit_override);
+    let tip_cu = cu_limits.for_tx(tx_index, std::slice::from_ref(&tip_ix));
+    let tip_ixs = with_compute_budget_first(vec![tip_ix], tip_cu);
     let tip_msg = v0::Message::try_compile(&payer_pk, &tip_ixs, &[], bh)
         .map_err(|e| TurbineError::Execute(format!("compile tip message: {e}")))?;
     let tip_tx = VersionedTransaction::try_new(VersionedMessage::V0(tip_msg), &[payer])
@@ -138,7 +169,7 @@ pub fn compile_single_tx_bundle(
     tip_lamports: u64,
     tip_accounts: &[Pubkey],
     blockhash: &str,
-    cu_limit_override: Option<u32>,
+    cu_limits: CuLimitPlan,
 ) -> Result<CompiledBundle> {
     if tip_accounts.is_empty() {
         return Err(TurbineError::Execute("no Jito tip accounts available".into()));
@@ -154,7 +185,8 @@ pub fn compile_single_tx_bundle(
     let tip_ix = system_transfer(&payer_pk, &tip_account, tip_lamports);
     let mut body: Vec<Instruction> = trade_ixs;
     body.push(tip_ix);
-    let ixs = with_compute_budget_first(body, cu_limit_override);
+    let cu = cu_limits.for_tx(0, &body);
+    let ixs = with_compute_budget_first(body, cu);
 
     let msg = v0::Message::try_compile(&payer_pk, &ixs, &[], bh)
         .map_err(|e| TurbineError::Execute(format!("compile single-tx message: {e}")))?;
@@ -234,7 +266,7 @@ mod tests {
     fn tip_only_bundle_has_cu_then_tip() {
         let payer = Keypair::new();
         let tips = vec![Pubkey::new_from_array([7u8; 32])];
-        let b = compile_bundle(&payer, vec![], 1_000, &tips, &bh(), 4, None).unwrap();
+        let b = compile_bundle(&payer, vec![], 1_000, &tips, &bh(), 4, CuLimitPlan::default()).unwrap();
         assert_eq!(b.txs.len(), 1);
         assert_eq!(first_ix_program_id(&b.txs[0]), tx::compute_budget_program_id());
         assert_eq!(last_ix_program_id(&b.txs[0]), tx::system_program_id());
@@ -251,7 +283,7 @@ mod tests {
         let groups: Vec<Vec<Instruction>> = (0..10)
             .map(|_| vec![system_transfer(&payer.pubkey(), &to, 1)])
             .collect();
-        let b = compile_bundle(&payer, groups, 1_000, &tips, &bh(), 4, None).unwrap();
+        let b = compile_bundle(&payer, groups, 1_000, &tips, &bh(), 4, CuLimitPlan::default()).unwrap();
         assert_eq!(b.txs.len(), MAX_TRADE_TXS + 1);
         for tx in &b.txs {
             assert_eq!(first_ix_program_id(tx), tx::compute_budget_program_id());
@@ -263,7 +295,7 @@ mod tests {
     #[test]
     fn errors_without_tip_accounts() {
         let payer = Keypair::new();
-        assert!(compile_bundle(&payer, vec![], 1_000, &[], &bh(), 4, None).is_err());
+        assert!(compile_bundle(&payer, vec![], 1_000, &[], &bh(), 4, CuLimitPlan::default()).is_err());
     }
 
     #[test]
@@ -272,7 +304,7 @@ mod tests {
         let tips = vec![Pubkey::new_from_array([7u8; 32])];
         let to = Pubkey::new_from_array([9u8; 32]);
         let trade = vec![system_transfer(&payer.pubkey(), &to, 1)];
-        let b = compile_single_tx_bundle(&payer, trade, 1_000, &tips, &bh(), None).unwrap();
+        let b = compile_single_tx_bundle(&payer, trade, 1_000, &tips, &bh(), CuLimitPlan::default()).unwrap();
         assert_eq!(b.txs.len(), 1);
         assert_eq!(first_ix_program_id(&b.txs[0]), tx::compute_budget_program_id());
         assert_eq!(last_ix_program_id(&b.txs[0]), tx::system_program_id());

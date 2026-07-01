@@ -24,7 +24,10 @@
 //! hot path would kill the daemon, so this module is panic-free by construction.
 
 use solana_pubkey::Pubkey;
-use yellowstone_grpc_proto::geyser::SubscribeUpdateTransactionInfo;
+use yellowstone_grpc_proto::geyser::{
+    SubscribeUpdateDeshredTransactionInfo, SubscribeUpdateTransactionInfo,
+};
+use yellowstone_grpc_proto::prelude::Message;
 
 /// Convert a 32-byte slice to a [`Pubkey`], or `None` if the length is wrong.
 #[inline]
@@ -33,7 +36,40 @@ fn to_pubkey(bytes: &[u8]) -> Option<Pubkey> {
     Some(Pubkey::new_from_array(arr))
 }
 
-/// Extract the writable account set (static + ALT-loaded) from a tx update.
+/// Static writable accounts from a message header layout (legacy + v0 static keys).
+fn static_writables_from_message(msg: &Message) -> Vec<Pubkey> {
+    let mut out = Vec::new();
+    let Some(header) = msg.header.as_ref() else {
+        return out;
+    };
+    let s = header.num_required_signatures as usize;
+    let rs = header.num_readonly_signed_accounts as usize;
+    let ru = header.num_readonly_unsigned_accounts as usize;
+    let keys = &msg.account_keys;
+    let k = keys.len();
+
+    let consistent = rs <= s && s <= k && ru <= k.saturating_sub(s);
+    if !consistent {
+        return out;
+    }
+    let ws_end = s - rs;
+    for key in keys.iter().take(ws_end) {
+        if let Some(pk) = to_pubkey(key) {
+            out.push(pk);
+        }
+    }
+    let wn_end = k - ru;
+    if s < wn_end {
+        for key in keys.iter().take(wn_end).skip(s) {
+            if let Some(pk) = to_pubkey(key) {
+                out.push(pk);
+            }
+        }
+    }
+    out
+}
+
+/// Extract the writable account set (static + ALT-loaded) from a Geyser tx update.
 ///
 /// Returns an empty vec for malformed/partial updates rather than panicking.
 pub fn writable_accounts(info: &SubscribeUpdateTransactionInfo) -> Vec<Pubkey> {
@@ -41,44 +77,36 @@ pub fn writable_accounts(info: &SubscribeUpdateTransactionInfo) -> Vec<Pubkey> {
 
     if let Some(tx) = info.transaction.as_ref() {
         if let Some(msg) = tx.message.as_ref() {
-            if let Some(header) = msg.header.as_ref() {
-                let s = header.num_required_signatures as usize;
-                let rs = header.num_readonly_signed_accounts as usize;
-                let ru = header.num_readonly_unsigned_accounts as usize;
-                let keys = &msg.account_keys;
-                let k = keys.len();
-
-                // Only trust the positional layout if the header is self-consistent;
-                // otherwise we skip the static set and rely on loaded addresses.
-                let consistent = rs <= s && s <= k && ru <= k.saturating_sub(s);
-                if consistent {
-                    // Writable signers: 0 .. (S - RS)
-                    let ws_end = s - rs;
-                    for key in keys.iter().take(ws_end) {
-                        if let Some(pk) = to_pubkey(key) {
-                            out.push(pk);
-                        }
-                    }
-                    // Writable non-signers: S .. (K - RU)
-                    let wn_end = k - ru;
-                    if s < wn_end {
-                        for key in keys.iter().take(wn_end).skip(s) {
-                            if let Some(pk) = to_pubkey(key) {
-                                out.push(pk);
-                            }
-                        }
-                    }
-                }
-            }
+            out.extend(static_writables_from_message(msg));
         }
     }
 
-    // ALT-loaded writable addresses (resolved by the validator, present in meta).
     if let Some(meta) = info.meta.as_ref() {
         for key in &meta.loaded_writable_addresses {
             if let Some(pk) = to_pubkey(key) {
                 out.push(pk);
             }
+        }
+    }
+
+    out
+}
+
+/// Extract writable accounts from a deshred (pre-execution) transaction update.
+///
+/// ALT-loaded writables are top-level on deshred updates — there is no `TransactionStatusMeta`.
+pub fn writable_accounts_deshred(info: &SubscribeUpdateDeshredTransactionInfo) -> Vec<Pubkey> {
+    let mut out = Vec::new();
+
+    if let Some(tx) = info.transaction.as_ref() {
+        if let Some(msg) = tx.message.as_ref() {
+            out.extend(static_writables_from_message(msg));
+        }
+    }
+
+    for key in &info.loaded_writable_addresses {
+        if let Some(pk) = to_pubkey(key) {
+            out.push(pk);
         }
     }
 
@@ -180,5 +208,46 @@ mod tests {
         let header = MessageHeader::default();
         let info = info_with(header, vec![], vec![]);
         assert_eq!(signature_bytes(&info), Some([7u8; 64]));
+    }
+
+    fn deshred_info_with(
+        header: MessageHeader,
+        account_keys: Vec<Vec<u8>>,
+        loaded_writable: Vec<Vec<u8>>,
+    ) -> SubscribeUpdateDeshredTransactionInfo {
+        SubscribeUpdateDeshredTransactionInfo {
+            signature: vec![7u8; 64],
+            is_vote: false,
+            transaction: Some(Transaction {
+                signatures: vec![vec![7u8; 64]],
+                message: Some(Message {
+                    header: Some(header),
+                    account_keys,
+                    recent_blockhash: vec![0u8; 32],
+                    instructions: vec![],
+                    versioned: false,
+                    address_table_lookups: vec![],
+                }),
+            }),
+            loaded_writable_addresses: loaded_writable,
+            loaded_readonly_addresses: vec![],
+            completed_data_set_starting_shred_index: 0,
+            completed_data_set_ending_shred_index_exclusive: 0,
+        }
+    }
+
+    #[test]
+    fn deshred_includes_alt_loaded_writable() {
+        let header = MessageHeader {
+            num_required_signatures: 1,
+            num_readonly_signed_accounts: 0,
+            num_readonly_unsigned_accounts: 1,
+        };
+        let keys = vec![key(10), key(11)];
+        let info = deshred_info_with(header, keys, vec![key(20)]);
+        let w = writable_accounts_deshred(&info);
+        assert!(w.contains(&to_pubkey(&key(10)).unwrap()));
+        assert!(w.contains(&to_pubkey(&key(20)).unwrap()));
+        assert_eq!(w.len(), 2);
     }
 }
